@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clear</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23000'/%3E%3Cg transform='rotate(-14 30 34)'%3E%3Crect x='12' y='22' width='34' height='26' rx='6' fill='%23c8102e'/%3E%3Crect x='12' y='22' width='34' height='9' rx='4' fill='%23c4c8cf'/%3E%3C/g%3E%3Cpath d='M48 8l2 5 5 2-5 2-2 5-2-5-5-2 5-2z' fill='%23fff'/%3E%3Cpath d='M52 42l1.4 3.6 3.6 1.4-3.6 1.4-1.4 3.6-1.4-3.6-3.6-1.4 3.6-1.4z' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+<style>
+  :root {
+    --bg: #cfd3d9;          /* silver */
+    --panel: #ffffff;
+    --line: #c4c8cf;        /* silver line */
+    --ink: #000000;
+    --muted: #5c6068;
+    --red: #c8102e;
+    --red-dark: #a30d25;
+    --red-soft: rgba(200, 16, 46, 0.32);
+    --focus: #1a56db;
+    --radius: 6px;
+    font-family: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+    font-size: 14px;
+    color: var(--ink);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); display: flex; flex-direction: column; overflow: hidden; }
+
+  button, input { font: inherit; color: inherit; }
+  button { cursor: pointer; border-radius: var(--radius); border: 1px solid var(--line); background: var(--panel); padding: 7px 12px; line-height: 1.2; }
+  button:hover:not(:disabled) { border-color: #b8bec8; }
+  button:disabled { opacity: 0.45; cursor: default; }
+  button.primary { background: var(--red); color: #fff; border-color: var(--red); font-weight: 500; }
+  button.primary:hover:not(:disabled) { background: var(--red-dark); border-color: var(--red-dark); }
+  button.danger { color: var(--red); border-color: var(--red); }
+  button.small { padding: 5px 9px; font-size: 13px; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  input[type=text] { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: var(--radius); background: #fff; }
+
+  header {
+    display: flex; align-items: center; gap: 14px;
+    padding: 0 18px; height: 60px; flex: 0 0 auto;
+    background: #000; color: #fff; border-bottom: 3px solid var(--red);
+  }
+  header .brand { display: flex; align-items: center; gap: 10px; }
+  header h1 { font-size: 22px; font-weight: 600; margin: 0; letter-spacing: -0.02em; color: #fff; }
+  header .file { color: #c4c8cf; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 30vw; padding-left: 14px; border-left: 1px solid #3a3d42; }
+  header .spacer { flex: 1; }
+  header button { background: transparent; color: #fff; border-color: #6b6f76; }
+  header button:hover:not(:disabled) { border-color: #fff; }
+  header button.primary { background: var(--red); border-color: var(--red); }
+  header button.primary:hover:not(:disabled) { background: var(--red-dark); border-color: var(--red-dark); }
+  header button:focus-visible { outline-color: #fff; }
+  .privacy { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; color: #c4c8cf; }
+  .privacy::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 2px #000, 0 0 0 3px #c4c8cf; }
+
+  main { flex: 1; display: grid; grid-template-columns: 270px 1fr; min-height: 0; }
+  aside {
+    background: var(--panel); border-right: 1px solid var(--line);
+    padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 22px;
+  }
+  aside h2 { font-size: 13px; font-weight: 600; margin: 0 0 8px; }
+  aside p { margin: 0 0 8px; color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .row + .row { margin-top: 6px; }
+  .count { font-size: 12.5px; color: var(--muted); }
+  kbd { font-family: inherit; font-size: 11.5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: #f6f7f9; }
+  .note { font-size: 12px; color: var(--muted); line-height: 1.45; border-top: 1px solid var(--line); padding-top: 12px; margin-top: auto; }
+
+  .viewer { overflow: auto; position: relative; padding: 28px 24px 60px; }
+  .pages { display: flex; flex-direction: column; align-items: center; gap: 22px; }
+  .page { position: relative; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.12), 0 6px 18px rgba(0,0,0,.08); }
+  .page canvas { display: block; }
+  .page .pnum { position: absolute; left: 0; top: -20px; font-size: 12px; color: var(--muted); }
+  .overlay { position: absolute; inset: 0; cursor: crosshair; touch-action: none; user-select: none; }
+  .mark {
+    position: absolute; background: var(--red-soft); border: 1.5px solid var(--red);
+    cursor: pointer; box-sizing: border-box;
+  }
+  .mark.selected { border-width: 2.5px; background: rgba(200, 16, 46, 0.55); outline: 2px solid #fff; box-shadow: 0 0 0 4px rgba(0,0,0,.35); }
+  .mark .x {
+    position: absolute; top: -12px; right: -12px; width: 24px; height: 24px; border-radius: 50%;
+    background: #000; color: #fff; border: 2px solid #fff; display: none; align-items: center; justify-content: center;
+    font-size: 15px; line-height: 1; cursor: pointer; z-index: 2;
+  }
+  .mark.selected .x { display: flex; }
+  .mark.temp { pointer-events: none; }
+
+  .drop {
+    height: 100%; min-height: 60vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    border: 2px dashed #9da2ab; border-radius: 12px; color: var(--muted); text-align: center; gap: 10px; padding: 24px;
+  }
+  .drop.over { border-color: var(--red); color: var(--ink); background: #fff; }
+  .drop strong { font-size: 18px; font-weight: 500; color: var(--ink); }
+  .drop .logo { width: 220px; height: auto; margin-bottom: 8px; }
+  .drop .logo line { stroke: #000; }
+  .drop .logo path { fill: var(--red); }
+  .drop.over .logo path { fill: #000; }
+
+  .status {
+    position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+    background: var(--ink); color: #fff; padding: 9px 14px; border-radius: 8px; font-size: 13px;
+    opacity: 0; transition: opacity .15s; pointer-events: none; max-width: 90vw;
+  }
+  .status.show { opacity: 1; }
+  .status.err { background: var(--red); }
+
+  @media (max-width: 760px) {
+    main { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    aside { border-right: 0; border-bottom: 1px solid var(--line); max-height: 40vh; }
+    header .file { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) { .status { transition: none; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <svg class="logo" viewBox="0 0 128 52" width="74" height="30" aria-hidden="true">
+    <g stroke="#f4f5f7" stroke-width="4.5" stroke-linecap="round">
+      <line x1="70" y1="14" x2="118" y2="14"/><line x1="70" y1="26" x2="110" y2="26"/><line x1="70" y1="38" x2="120" y2="38"/>
+    </g>
+    <g stroke="#f4f5f7" stroke-width="4.5" stroke-linecap="round" opacity=".28">
+      <line x1="60" y1="14" x2="64" y2="14"/><line x1="58" y1="26" x2="64" y2="26"/><line x1="61" y1="38" x2="64" y2="38"/>
+    </g>
+    <g transform="rotate(-14 38 27)">
+      <rect x="18" y="12" width="40" height="30" rx="7" fill="#c8102e"/>
+      <rect x="18" y="12" width="40" height="10" rx="5" fill="#c4c8cf"/>
+      <circle cx="27" cy="31" r="1.7" fill="#8d0b20"/><circle cx="36" cy="35" r="1.4" fill="#8d0b20"/><circle cx="45" cy="30" r="1.7" fill="#8d0b20"/><circle cx="31" cy="38" r="1.2" fill="#8d0b20"/><circle cx="50" cy="37" r="1.3" fill="#8d0b20"/>
+    </g>
+    <path d="M12 3l1.8 4.6L18.4 9.4 13.8 11.2 12 15.8 10.2 11.2 5.6 9.4 10.2 7.6z" fill="#fff"/>
+    <path d="M6 32l1.2 3 3 1.2-3 1.2-1.2 3-1.2-3-3-1.2 3-1.2z" fill="#fff"/>
+    <path d="M64 44l1 2.6 2.6 1-2.6 1-1 2.6-1-2.6-2.6-1 2.6-1z" fill="#fff"/>
+  </svg>
+    <h1>Clear</h1>
+  </div>
+  <span class="file" id="fileName"></span>
+  <span class="spacer"></span>
+  <span class="privacy" title="The PDF is opened, marked and rebuilt inside this browser tab. It is never uploaded.">Runs on this computer only</span>
+  <input type="file" id="fileInput" accept="application/pdf,.pdf" hidden>
+  <button id="openBtn">Open PDF</button>
+  <button id="exportBtn" class="primary" disabled>Export redacted PDF</button>
+</header>
+
+<main>
+  <aside>
+    <div>
+      <h2>Draw a box</h2>
+      <p>Drag on any page to cover an area. A new box is selected as soon as you draw it. Click any box to select it, then use its <b>×</b>, press <kbd>Delete</kbd>, or double-click it to remove it.</p>
+    </div>
+
+    <div>
+      <h2>Find and mark text</h2>
+      <input type="text" id="findInput" placeholder="Name, address, rego…" disabled>
+      <div class="row" style="margin-top:8px">
+        <button id="findBtn" class="small" disabled>Mark all matches</button>
+        <span class="count" id="findCount"></span>
+      </div>
+      <p style="margin-top:10px">Quick patterns:</p>
+      <div class="row">
+        <button class="small pattern" data-pattern="email" disabled>Email addresses</button>
+        <button class="small pattern" data-pattern="phone" disabled>Phone numbers</button>
+        <button class="small pattern" data-pattern="vin" disabled>VINs</button>
+      </div>
+    </div>
+
+    <div>
+      <h2>Marks</h2>
+      <div class="row">
+        <span class="count" id="markCount">No marks yet</span>
+      </div>
+      <div class="row">
+        <span class="count" id="selCount">Nothing selected</span>
+      </div>
+      <div class="row">
+        <button id="undoBtn" class="small" disabled>Undo</button>
+        <button id="deleteBtn" class="small" disabled>Delete selected</button>
+        <button id="clearBtn" class="small danger" disabled>Clear all</button>
+      </div>
+    </div>
+
+    <div>
+      <h2>Zoom</h2>
+      <div class="row">
+        <button id="zoomOut" class="small" disabled>−</button>
+        <button id="zoomIn" class="small" disabled>+</button>
+        <button id="zoomFit" class="small" disabled>Fit width</button>
+      </div>
+    </div>
+
+    <div class="note">
+      Export flattens every page to an image with the marked areas painted solid black, then builds a fresh PDF. The text and metadata underneath are removed, not just hidden, so the redacted file is not text-searchable.<br><br>
+      Nothing is uploaded. The only network requests this page makes are to load two open-source libraries (pdf.js and pdf-lib) when it opens.
+    </div>
+  </aside>
+
+  <section class="viewer" id="viewer">
+    <div class="drop" id="drop">
+      <svg class="logo" viewBox="0 0 128 52"  aria-hidden="true">
+    <g stroke="#f4f5f7" stroke-width="4.5" stroke-linecap="round">
+      <line x1="70" y1="14" x2="118" y2="14"/><line x1="70" y1="26" x2="110" y2="26"/><line x1="70" y1="38" x2="120" y2="38"/>
+    </g>
+    <g stroke="#f4f5f7" stroke-width="4.5" stroke-linecap="round" opacity=".28">
+      <line x1="60" y1="14" x2="64" y2="14"/><line x1="58" y1="26" x2="64" y2="26"/><line x1="61" y1="38" x2="64" y2="38"/>
+    </g>
+    <g transform="rotate(-14 38 27)">
+      <rect x="18" y="12" width="40" height="30" rx="7" fill="#c8102e"/>
+      <rect x="18" y="12" width="40" height="10" rx="5" fill="#c4c8cf"/>
+      <circle cx="27" cy="31" r="1.7" fill="#8d0b20"/><circle cx="36" cy="35" r="1.4" fill="#8d0b20"/><circle cx="45" cy="30" r="1.7" fill="#8d0b20"/><circle cx="31" cy="38" r="1.2" fill="#8d0b20"/><circle cx="50" cy="37" r="1.3" fill="#8d0b20"/>
+    </g>
+    <path d="M12 3l1.8 4.6L18.4 9.4 13.8 11.2 12 15.8 10.2 11.2 5.6 9.4 10.2 7.6z" fill="#fff"/>
+    <path d="M6 32l1.2 3 3 1.2-3 1.2-1.2 3-1.2-3-3-1.2 3-1.2z" fill="#fff"/>
+    <path d="M64 44l1 2.6 2.6 1-2.6 1-1 2.6-1-2.6-2.6-1 2.6-1z" fill="#fff"/>
+  </svg>
+      <strong>Drop a PDF here</strong>
+      <span>or use Open PDF above. The file stays on this computer.</span>
+    </div>
+    <div class="pages" id="pages"></div>
+  </section>
+</main>
+
+<div class="status" id="status" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+  if (!window.pdfjsLib || !window.PDFLib) {
+    document.getElementById('status').textContent = 'Clear could not load its PDF libraries. Check the internet connection and reload.';
+    document.getElementById('status').className = 'status show err';
+    return;
+  }
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+  const $ = (id) => document.getElementById(id);
+  const els = {
+    fileInput: $('fileInput'), openBtn: $('openBtn'), exportBtn: $('exportBtn'), fileName: $('fileName'),
+    findInput: $('findInput'), findBtn: $('findBtn'), findCount: $('findCount'),
+    markCount: $('markCount'), selCount: $('selCount'), undoBtn: $('undoBtn'), deleteBtn: $('deleteBtn'), clearBtn: $('clearBtn'),
+    zoomIn: $('zoomIn'), zoomOut: $('zoomOut'), zoomFit: $('zoomFit'),
+    viewer: $('viewer'), drop: $('drop'), pages: $('pages'), status: $('status'),
+    patterns: Array.from(document.querySelectorAll('.pattern')),
+  };
+
+  const state = {
+    pdf: null, pages: [], marks: [], selected: null, scale: 1, history: [], fileName: '', nextId: 1, busy: false,
+  };
+
+  /* ---------- status ---------- */
+  let statusTimer;
+  function status(msg, opts = {}) {
+    clearTimeout(statusTimer);
+    els.status.textContent = msg;
+    els.status.className = 'status show' + (opts.error ? ' err' : '');
+    if (!opts.sticky) statusTimer = setTimeout(() => (els.status.className = 'status'), opts.error ? 5000 : 2200);
+  }
+  function hideStatus() { clearTimeout(statusTimer); els.status.className = 'status'; }
+
+  /* ---------- enable/disable ---------- */
+  function refreshControls() {
+    const loaded = !!state.pdf && !state.busy;
+    const n = state.marks.length;
+    const pagesWithMarks = new Set(state.marks.map(m => m.page)).size;
+    [els.findInput, els.findBtn, els.zoomIn, els.zoomOut, els.zoomFit, ...els.patterns].forEach(e => (e.disabled = !loaded));
+    els.exportBtn.disabled = !loaded;
+    els.undoBtn.disabled = !loaded || state.history.length === 0;
+    els.clearBtn.disabled = !loaded || state.marks.length === 0;
+    els.deleteBtn.disabled = !loaded || state.selected == null;
+    const sel = state.marks.find(m => m.id === state.selected);
+    els.selCount.textContent = sel ? `Selected: mark on page ${sel.page}` : (n ? 'Nothing selected. Click a box to select it.' : 'Nothing selected');
+    els.markCount.textContent = n === 0 ? 'No marks yet' : `${n} mark${n === 1 ? '' : 's'} across ${pagesWithMarks} page${pagesWithMarks === 1 ? '' : 's'}`;
+  }
+
+  /* ---------- loading ---------- */
+  async function loadFile(file) {
+    if (!file) return;
+    if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') { status('That file is not a PDF.', { error: true }); return; }
+    state.busy = true; refreshControls();
+    status('Opening ' + file.name + '…', { sticky: true });
+    try {
+      const data = new Uint8Array(await file.arrayBuffer());
+      const pdf = await pdfjsLib.getDocument({ data }).promise;
+      if (state.pdf) { try { state.pdf.destroy(); } catch (e) {} }
+      state.pdf = pdf; state.pages = []; state.marks = []; state.history = []; state.selected = null;
+      state.fileName = file.name;
+      els.fileName.textContent = file.name + ' · ' + pdf.numPages + ' page' + (pdf.numPages === 1 ? '' : 's');
+      for (let i = 1; i <= pdf.numPages; i++) {
+        state.pages.push({ num: i, page: await pdf.getPage(i), text: null, viewport: null, canvas: null, overlay: null, wrap: null });
+      }
+      els.drop.style.display = 'none';
+      fitWidth();
+      await renderAll();
+      hideStatus();
+    } catch (err) {
+      const msg = /password/i.test(String(err && err.name)) || /password/i.test(String(err && err.message))
+        ? 'This PDF is password-protected. Remove the password first, then open it here.'
+        : 'Could not open that PDF. ' + (err && err.message ? err.message : '');
+      status(msg, { error: true });
+    } finally {
+      state.busy = false; refreshControls();
+    }
+  }
+
+  function fitWidth() {
+    const first = state.pages[0]; if (!first) return;
+    const vp1 = first.page.getViewport({ scale: 1 });
+    const avail = els.viewer.clientWidth - 48;
+    state.scale = Math.max(0.3, Math.min(2.5, avail / vp1.width));
+  }
+
+  async function renderAll() {
+    els.pages.innerHTML = '';
+    const dpr = window.devicePixelRatio || 1;
+    for (const p of state.pages) {
+      const vp = p.page.getViewport({ scale: state.scale });
+      p.viewport = vp;
+      const wrap = document.createElement('div'); wrap.className = 'page';
+      wrap.style.width = vp.width + 'px'; wrap.style.height = vp.height + 'px';
+      const num = document.createElement('div'); num.className = 'pnum'; num.textContent = 'Page ' + p.num;
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(vp.width * dpr); canvas.height = Math.round(vp.height * dpr);
+      canvas.style.width = vp.width + 'px'; canvas.style.height = vp.height + 'px';
+      const overlay = document.createElement('div'); overlay.className = 'overlay';
+      wrap.append(num, canvas, overlay);
+      els.pages.appendChild(wrap);
+      p.wrap = wrap; p.canvas = canvas; p.overlay = overlay;
+      bindOverlay(p);
+      drawMarks(p);
+      const ctx = canvas.getContext('2d');
+      await p.page.render({ canvasContext: ctx, viewport: vp, transform: dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null }).promise;
+    }
+  }
+
+  /* ---------- coordinate helpers (marks stored in PDF points) ---------- */
+  function pdfRectToView(p, m) {
+    const [x1, y1, x2, y2] = p.viewport.convertToViewportRectangle([m.x, m.y, m.x + m.w, m.y + m.h]);
+    return { left: Math.min(x1, x2), top: Math.min(y1, y2), width: Math.abs(x2 - x1), height: Math.abs(y2 - y1) };
+  }
+  function viewToPdf(p, x, y) { return p.viewport.convertToPdfPoint(x, y); }
+
+  /* ---------- marks ---------- */
+  function snapshot() {
+    state.history.push(state.marks.map(m => ({ ...m })));
+    if (state.history.length > 60) state.history.shift();
+  }
+  function addMarks(list, selectLast) {
+    if (!list.length) return 0;
+    snapshot();
+    let added = 0;
+    for (const m of list) {
+      if (m.w < 1 || m.h < 1) continue;
+      const dup = state.marks.some(o => o.page === m.page && Math.abs(o.x - m.x) < 0.5 && Math.abs(o.y - m.y) < 0.5 && Math.abs(o.w - m.w) < 0.5 && Math.abs(o.h - m.h) < 0.5);
+      if (dup) continue;
+      const id = state.nextId++;
+      state.marks.push({ id, ...m }); added++;
+      if (selectLast) state.selected = id;
+    }
+    if (!added) state.history.pop();
+    redrawAll(); return added;
+  }
+  function removeMark(id) {
+    snapshot();
+    state.marks = state.marks.filter(m => m.id !== id);
+    if (state.selected === id) state.selected = null;
+    redrawAll();
+  }
+  function undo() {
+    if (!state.history.length) return;
+    state.marks = state.history.pop(); state.selected = null; redrawAll();
+    status('Undone');
+  }
+  function redrawAll() { state.pages.forEach(drawMarks); refreshControls(); }
+
+  function drawMarks(p) {
+    if (!p.overlay) return;
+    p.overlay.querySelectorAll('.mark:not(.temp)').forEach(e => e.remove());
+    for (const m of state.marks) {
+      if (m.page !== p.num) continue;
+      const r = pdfRectToView(p, m);
+      const el = document.createElement('div');
+      el.className = 'mark' + (m.id === state.selected ? ' selected' : '');
+      el.style.left = r.left + 'px'; el.style.top = r.top + 'px'; el.style.width = r.width + 'px'; el.style.height = r.height + 'px';
+      el.dataset.id = m.id; el.title = 'Click to select. Delete key removes it.';
+      if (m.id === state.selected) {
+        const x = document.createElement('span'); x.className = 'x'; x.textContent = '×'; x.title = 'Remove this mark';
+        x.addEventListener('pointerdown', (e) => { e.stopPropagation(); removeMark(m.id); status('Mark removed'); });
+        el.appendChild(x);
+      }
+      p.overlay.appendChild(el);
+    }
+  }
+
+  function bindOverlay(p) {
+    let drawing = null;
+    const ov = p.overlay;
+    ov.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      const markEl = e.target.closest('.mark');
+      if (markEl) { state.selected = Number(markEl.dataset.id); redrawAll(); return; }
+      state.selected = null; redrawAll();
+      const rect = ov.getBoundingClientRect();
+      drawing = { x0: e.clientX - rect.left, y0: e.clientY - rect.top, el: null };
+      ov.setPointerCapture(e.pointerId);
+    });
+    ov.addEventListener('pointermove', (e) => {
+      if (!drawing) return;
+      const rect = ov.getBoundingClientRect();
+      const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+      const y = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
+      if (!drawing.el) { drawing.el = document.createElement('div'); drawing.el.className = 'mark temp'; ov.appendChild(drawing.el); }
+      const l = Math.min(x, drawing.x0), t = Math.min(y, drawing.y0);
+      Object.assign(drawing.el.style, { left: l + 'px', top: t + 'px', width: Math.abs(x - drawing.x0) + 'px', height: Math.abs(y - drawing.y0) + 'px' });
+      drawing.x1 = x; drawing.y1 = y;
+    });
+    const finish = (e) => {
+      if (!drawing) return;
+      const d = drawing; drawing = null;
+      if (d.el) d.el.remove();
+      if (d.x1 == null || Math.abs(d.x1 - d.x0) < 4 || Math.abs(d.y1 - d.y0) < 4) return;
+      const [ax, ay] = viewToPdf(p, d.x0, d.y0);
+      const [bx, by] = viewToPdf(p, d.x1, d.y1);
+      addMarks([{ page: p.num, x: Math.min(ax, bx), y: Math.min(ay, by), w: Math.abs(bx - ax), h: Math.abs(by - ay) }], true);
+    };
+    ov.addEventListener('pointerup', finish);
+    ov.addEventListener('dblclick', (e) => { const el = e.target.closest('.mark'); if (el) { removeMark(Number(el.dataset.id)); status('Mark removed'); } });
+    ov.addEventListener('pointercancel', finish);
+  }
+
+  /* ---------- text search ---------- */
+  async function getItems(p) {
+    if (!p.text) p.text = await p.page.getTextContent();
+    return p.text.items.filter(it => it.str && it.str.length && it.width > 0);
+  }
+
+  // Convert a character span [i, i+len) of a text item into a PDF-space bounding box.
+  function spanToRect(item, i, len) {
+    const [a, b, c, d, e, f] = item.transform;
+    const n = item.str.length;
+    let ux = a, uy = b, un = Math.hypot(ux, uy) || 1; ux /= un; uy /= un;      // text direction
+    let vx = c, vy = d, vn = Math.hypot(vx, vy) || 1; vx /= vn; vy /= vn;      // up direction
+    const w = item.width, h = item.height || Math.hypot(c, d);
+    const s = w * (i / n), l = w * (len / n);
+    const desc = h * 0.25, pad = 1.5;
+    const x0 = e + ux * s, y0 = f + uy * s;
+    const corners = [
+      [x0 - vx * desc, y0 - vy * desc],
+      [x0 + ux * l - vx * desc, y0 + uy * l - vy * desc],
+      [x0 + vx * h, y0 + vy * h],
+      [x0 + ux * l + vx * h, y0 + uy * l + vy * h],
+    ];
+    const xs = corners.map(c => c[0]), ys = corners.map(c => c[1]);
+    const minX = Math.min(...xs) - pad, maxX = Math.max(...xs) + pad, minY = Math.min(...ys) - pad, maxY = Math.max(...ys) + pad;
+    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+  }
+
+  async function markMatches(matcher, label) {
+    state.busy = true; refreshControls();
+    status('Searching…', { sticky: true });
+    const found = [];
+    try {
+      for (const p of state.pages) {
+        const items = await getItems(p);
+        for (const it of items) {
+          for (const [i, len] of matcher(it.str)) found.push({ page: p.num, ...spanToRect(it, i, len) });
+        }
+      }
+    } finally { state.busy = false; }
+    const added = addMarks(found);
+    const msg = found.length ? `${label}: ${found.length} match${found.length === 1 ? '' : 'es'} marked` + (added < found.length ? ` (${found.length - added} already marked)` : '') : `${label}: no matches found`;
+    els.findCount.textContent = msg;
+    status(msg);
+    refreshControls();
+  }
+
+  function literalMatcher(q) {
+    const needle = q.toLowerCase();
+    return (str) => {
+      const out = []; const hay = str.toLowerCase(); let idx = 0;
+      while ((idx = hay.indexOf(needle, idx)) !== -1) { out.push([idx, needle.length]); idx += needle.length; }
+      return out;
+    };
+  }
+  function regexMatcher(re) {
+    return (str) => { const out = []; let m; re.lastIndex = 0; while ((m = re.exec(str)) !== null) { if (m[0].length) out.push([m.index, m[0].length]); else re.lastIndex++; } return out; };
+  }
+  const patterns = {
+    email: { label: 'Email addresses', re: /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g },
+    phone: { label: 'Phone numbers', re: /(?:\+?61|\(0\d\)|0)[\s-]?\d(?:[\s-]?\d){7,9}\b/g },
+    vin:   { label: 'VINs', re: /\b[A-HJ-NPR-Z0-9]{17}\b/g },
+  };
+
+  /* ---------- export ---------- */
+  async function exportPdf() {
+    if (!state.pdf) return;
+    state.busy = true; refreshControls();
+    try {
+      const out = await PDFLib.PDFDocument.create();
+      out.setTitle('Redacted document'); out.setProducer('Clear'); out.setCreator('Clear');
+      const total = state.pages.length;
+      for (const p of state.pages) {
+        status(`Exporting page ${p.num} of ${total}…`, { sticky: true });
+        const vp1 = p.page.getViewport({ scale: 1 });
+        const scale = 2.5; // ~180 dpi
+        const vp = p.page.getViewport({ scale });
+        const c = document.createElement('canvas');
+        c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+        await p.page.render({ canvasContext: ctx, viewport: vp }).promise;
+        ctx.fillStyle = '#000';
+        for (const m of state.marks) {
+          if (m.page !== p.num) continue;
+          const [x1, y1, x2, y2] = vp.convertToViewportRectangle([m.x, m.y, m.x + m.w, m.y + m.h]);
+          const l = Math.floor(Math.min(x1, x2)), t = Math.floor(Math.min(y1, y2));
+          ctx.fillRect(l, t, Math.ceil(Math.abs(x2 - x1)) + 1, Math.ceil(Math.abs(y2 - y1)) + 1);
+        }
+        const blob = await new Promise(r => c.toBlob(r, 'image/jpeg', 0.9));
+        const img = await out.embedJpg(new Uint8Array(await blob.arrayBuffer()));
+        const page = out.addPage([vp1.width, vp1.height]);
+        page.drawImage(img, { x: 0, y: 0, width: vp1.width, height: vp1.height });
+        c.width = c.height = 0; // free memory
+      }
+      const bytes = await out.save();
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+      const a = document.createElement('a');
+      a.href = url; a.download = state.fileName.replace(/\.pdf$/i, '') + '-redacted.pdf';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      status(`Exported ${a.download}`);
+    } catch (err) {
+      status('Export failed. ' + (err && err.message ? err.message : ''), { error: true });
+    } finally { state.busy = false; refreshControls(); }
+  }
+
+  /* ---------- wiring ---------- */
+  els.openBtn.addEventListener('click', () => els.fileInput.click());
+  els.fileInput.addEventListener('change', () => { loadFile(els.fileInput.files[0]); els.fileInput.value = ''; });
+  els.exportBtn.addEventListener('click', exportPdf);
+
+  els.findBtn.addEventListener('click', () => { const q = els.findInput.value.trim(); if (q) markMatches(literalMatcher(q), `"${q}"`); });
+  els.findInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') els.findBtn.click(); });
+  els.patterns.forEach(b => b.addEventListener('click', () => { const pt = patterns[b.dataset.pattern]; markMatches(regexMatcher(pt.re), pt.label); }));
+
+  els.undoBtn.addEventListener('click', undo);
+  els.deleteBtn.addEventListener('click', () => { if (state.selected != null) { removeMark(state.selected); status('Mark removed'); } });
+  els.clearBtn.addEventListener('click', () => { if (!state.marks.length) return; snapshot(); state.marks = []; state.selected = null; redrawAll(); status('All marks cleared'); });
+
+  async function setScale(s) { state.scale = Math.max(0.3, Math.min(4, s)); state.busy = true; refreshControls(); await renderAll(); state.busy = false; refreshControls(); }
+  els.zoomIn.addEventListener('click', () => setScale(state.scale * 1.25));
+  els.zoomOut.addEventListener('click', () => setScale(state.scale / 1.25));
+  els.zoomFit.addEventListener('click', () => { fitWidth(); setScale(state.scale); });
+
+  document.addEventListener('keydown', (e) => {
+    const typing = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA');
+    if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && state.selected != null) { e.preventDefault(); removeMark(state.selected); }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); undo(); }
+    if (e.key === 'Escape') { state.selected = null; redrawAll(); }
+  });
+
+  // drag and drop anywhere over the viewer
+  ['dragenter', 'dragover'].forEach(ev => els.viewer.addEventListener(ev, (e) => { e.preventDefault(); els.drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(ev => els.viewer.addEventListener(ev, (e) => { e.preventDefault(); els.drop.classList.remove('over'); }));
+  els.viewer.addEventListener('drop', (e) => { const f = e.dataTransfer.files && e.dataTransfer.files[0]; if (f) loadFile(f); });
+  window.addEventListener('dragover', e => e.preventDefault());
+  window.addEventListener('drop', e => e.preventDefault());
+
+  window.addEventListener('beforeunload', (e) => { if (state.marks.length) { e.preventDefault(); e.returnValue = ''; } });
+
+  refreshControls();
+})();
+</script>
+</body>
+</html>
