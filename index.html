@@ -154,9 +154,8 @@
     <div>
       <h2>Automatic</h2>
       <p>Applied to every PDF the moment it opens. Use <b>Run again</b> after removing boxes.</p>
-      <label class="chk"><input type="checkbox" id="autoSection" checked> Everything under this heading</label>
-      <input type="text" id="autoHeading" value="Customer Details" placeholder="Heading text" aria-label="Heading text">
-      <label class="chk" style="margin-top:8px"><input type="checkbox" id="autoPrices" checked> All prices and dollar amounts</label>
+      <label class="chk"><input type="checkbox" id="autoPrices" checked> All prices and dollar amounts</label>
+      <label class="chk"><input type="checkbox" id="autoPayment" checked> Payment details: any line mentioning a payment method, amount paid or due, card, EFT, BPAY, BSB or account details</label>
       <div class="row" style="margin-top:6px">
         <button id="autoRunBtn" class="small" disabled>Run again</button>
         <span class="count" id="autoCount"></span>
@@ -312,7 +311,7 @@ function init(libs) {
     findInput: $('findInput'), findBtn: $('findBtn'), findCount: $('findCount'),
     markCount: $('markCount'), selCount: $('selCount'), undoBtn: $('undoBtn'), deleteBtn: $('deleteBtn'), clearBtn: $('clearBtn'),
     zoomIn: $('zoomIn'), zoomOut: $('zoomOut'), zoomFit: $('zoomFit'),
-    autoSection: $('autoSection'), autoHeading: $('autoHeading'), autoPrices: $('autoPrices'), autoRunBtn: $('autoRunBtn'), autoCount: $('autoCount'),
+    autoPrices: $('autoPrices'), autoPayment: $('autoPayment'), autoRunBtn: $('autoRunBtn'), autoCount: $('autoCount'),
     viewer: $('viewer'), drop: $('drop'), pages: $('pages'), status: $('status'),
     patterns: Array.from(document.querySelectorAll('.pattern')),
   };
@@ -573,29 +572,20 @@ function init(libs) {
     return found.length;
   }
 
-  /* ---------- whole-section rule: every line under a heading, until a blank gap ---------- */
-  // Finds each text item containing the heading, then collects the lines below it that start in the
-  // same column, stopping at the first vertical gap wider than a couple of lines. One box per block.
-  function sectionRects(p, items, heading) {
-    const needle = heading.trim().toLowerCase();
-    if (needle.length < 2) return [];
+  /* ---------- whole-line rule: any line whose text matches, label and value together ---------- */
+  // For every text item matching the pattern, cover that item plus everything else sitting on the
+  // same baseline (a label in one column and its value in the next are usually separate items).
+  function lineRects(p, items, re) {
+    const info = items.map(it => ({ it, x: it.transform[4], y: it.transform[5], h: it.height || Math.hypot(it.transform[2], it.transform[3]) }));
     const rects = [];
-    const info = items.map(it => ({ it, x: it.transform[4], y: it.transform[5], h: it.height || Math.hypot(it.transform[2], it.transform[3]), w: it.width }));
-    for (const head of info) {
-      if (!head.it.str.toLowerCase().includes(needle)) continue;
-      const colL = head.x - 6, colR = head.x + Math.max(head.w, 260);
-      const below = info.filter(o => o !== head && o.y < head.y - 0.5 * head.h && o.x >= colL && o.x <= colR).sort((a, b) => b.y - a.y);
-      const block = [];
-      let lastY = head.y, lastH = head.h;
-      for (const o of below) {
-        const gap = lastY - o.y;
-        if (gap > 2.6 * Math.max(lastH, o.h)) break;
-        block.push(o); lastY = o.y; lastH = o.h;
-        if (block.length > 40) break;
-      }
-      if (!block.length) continue;
+    const done = new Set();
+    for (const hit of info) {
+      re.lastIndex = 0;
+      if (!re.test(hit.it.str) || done.has(hit)) continue;
+      const row = info.filter(o => Math.abs(o.y - hit.y) < 0.6 * Math.max(hit.h, o.h));
       let r = null;
-      for (const o of block) {
+      for (const o of row) {
+        done.add(o);
         const q = spanToRect(p, o.it, 0, o.it.str.length);
         r = r ? { x: Math.min(r.x, q.x), y: Math.min(r.y, q.y), x2: Math.max(r.x2, q.x + q.w), y2: Math.max(r.y2, q.y + q.h) } : { x: q.x, y: q.y, x2: q.x + q.w, y2: q.y + q.h };
       }
@@ -604,34 +594,36 @@ function init(libs) {
     return rects;
   }
 
-  async function markSections(heading) {
+  async function markLines(re) {
     state.busy = true; refreshControls();
     const found = [];
     try {
-      for (const p of state.pages) found.push(...sectionRects(p, await getItems(p), heading));
+      for (const p of state.pages) found.push(...lineRects(p, await getItems(p), re));
     } finally { state.busy = false; }
     addMarks(found);
     refreshControls();
     return found.length;
   }
 
+  const PAYMENT_RE = /payment|paid\b|pay\s?by|amount\s+(?:due|paid|owing|payable|received|tendered)|balance\s+due|total\s+due|due\s+(?:date|by)|\beft\b|bpay|direct\s+(?:deposit|debit)|bank\s+transfer|credit\s+card|debit\s+card|\bcard\b|visa|mastercard|\bamex\b|american\s+express|\bcash\b|cheque|\bcheck\s+no|\bbsb\b|acc(?:oun)?t\s*(?:no|number|name)|\bref(?:erence)?\s*(?:no|number)?\s*[:#]|receipt\s*(?:no|number|#)|tender|change\s+given|surcharge/i;
+
   /* ---------- automatic rules, run when a PDF opens ---------- */
-  const AUTO_KEY = 'clear.autoRules';
+  const AUTO_KEY = 'clear.autoRules.v2';
   function loadAutoRules() {
     try {
       const r = JSON.parse(localStorage.getItem(AUTO_KEY) || 'null');
-      if (r) { els.autoSection.checked = !!r.section; els.autoHeading.value = r.heading || 'Customer Details'; els.autoPrices.checked = !!r.prices; }
+      if (r) { els.autoPrices.checked = !!r.prices; els.autoPayment.checked = !!r.payment; }
     } catch (e) {}
   }
   function saveAutoRules() {
-    try { localStorage.setItem(AUTO_KEY, JSON.stringify({ section: els.autoSection.checked, heading: els.autoHeading.value, prices: els.autoPrices.checked })); } catch (e) {}
+    try { localStorage.setItem(AUTO_KEY, JSON.stringify({ prices: els.autoPrices.checked, payment: els.autoPayment.checked })); } catch (e) {}
   }
   async function runAutoRules() {
     if (!state.pdf) return;
     const parts = [];
-    if (els.autoSection.checked && els.autoHeading.value.trim()) {
-      const n = await markSections(els.autoHeading.value);
-      parts.push(`${n} "${els.autoHeading.value.trim()}" block${n === 1 ? '' : 's'}`);
+    if (els.autoPayment.checked) {
+      const n = await markLines(PAYMENT_RE);
+      parts.push(`${n} payment line${n === 1 ? '' : 's'}`);
     }
     if (els.autoPrices.checked) {
       const n = await markMatches(regexMatcher(patterns.price.re), patterns.price.label);
@@ -714,9 +706,8 @@ function init(libs) {
   els.findInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') els.findBtn.click(); });
   els.patterns.forEach(b => b.addEventListener('click', () => { const pt = patterns[b.dataset.pattern]; markMatches(regexMatcher(pt.re), pt.label); }));
   loadAutoRules();
-  [els.autoSection, els.autoHeading, els.autoPrices].forEach(e => e.addEventListener('change', saveAutoRules));
+  [els.autoPrices, els.autoPayment].forEach(e => e.addEventListener('change', saveAutoRules));
   els.autoRunBtn.addEventListener('click', runAutoRules);
-  els.autoHeading.addEventListener('keydown', (e) => { if (e.key === 'Enter') runAutoRules(); });
 
   els.undoBtn.addEventListener('click', undo);
   els.deleteBtn.addEventListener('click', () => { if (state.selected != null) { removeMark(state.selected); status('Box removed. The text is visible again.'); } });
