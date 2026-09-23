@@ -7,8 +7,6 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23000'/%3E%3Cg transform='rotate(-14 30 34)'%3E%3Crect x='12' y='22' width='34' height='26' rx='6' fill='%23c8102e'/%3E%3Crect x='12' y='22' width='34' height='9' rx='4' fill='%23c4c8cf'/%3E%3C/g%3E%3Cpath d='M48 8l2 5 5 2-5 2-2 5-2-5-5-2 5-2z' fill='%23fff'/%3E%3Cpath d='M52 42l1.4 3.6 3.6 1.4-3.6 1.4-1.4 3.6-1.4-3.6-3.6-1.4 3.6-1.4z' fill='%23fff'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
 <style>
   :root {
     --bg: #cfd3d9;          /* silver */
@@ -77,10 +75,14 @@
   .page .pnum { position: absolute; left: 0; top: -20px; font-size: 12px; color: var(--muted); }
   .overlay { position: absolute; inset: 0; cursor: crosshair; touch-action: none; user-select: none; }
   .mark {
-    position: absolute; background: var(--red-soft); border: 1.5px solid var(--red);
-    cursor: pointer; box-sizing: border-box;
+    position: absolute; background: #fff; border: 1.5px solid var(--red);
+    cursor: pointer; box-sizing: border-box; transition: background .12s;
   }
-  .mark.selected { border-width: 2.5px; background: rgba(200, 16, 46, 0.55); outline: 2px solid #fff; box-shadow: 0 0 0 4px rgba(0,0,0,.35); }
+  .mark:hover { background: rgba(255, 255, 255, 0.35); }                 /* peek at what is underneath */
+  .mark.selected { border-width: 2.5px; outline: 2px solid #fff; box-shadow: 0 0 0 4px var(--red); }
+  .chk { display: flex; align-items: flex-start; gap: 7px; font-size: 12.5px; margin: 4px 0; cursor: pointer; }
+  .chk input { margin: 2px 0 0; }
+  .mark.temp { background: var(--red-soft); }
   .mark .x {
     position: absolute; top: -12px; right: -12px; width: 24px; height: 24px; border-radius: 50%;
     background: #000; color: #fff; border: 2px solid #fff; display: none; align-items: center; justify-content: center;
@@ -88,6 +90,7 @@
   }
   .mark.selected .x { display: flex; }
   .mark.temp { pointer-events: none; }
+  code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; }
 
   .drop {
     height: 100%; min-height: 60vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -149,15 +152,29 @@
 <main>
   <aside>
     <div>
-      <h2>Draw a box</h2>
-      <p>Drag on any page to cover an area. A new box is selected as soon as you draw it. Click any box to select it, then use its <b>×</b>, press <kbd>Delete</kbd>, or double-click it to remove it.</p>
+      <h2>Automatic</h2>
+      <p>Applied to every PDF the moment it opens. Use <b>Run again</b> after removing boxes.</p>
+      <label class="chk"><input type="checkbox" id="autoPrices" checked> All prices and dollar amounts</label>
+      <label class="chk"><input type="checkbox" id="autoPayment" checked> Payment details: any line mentioning a payment method, amount paid or due, card, EFT, BPAY, BSB or account details</label>
+      <label class="chk"><input type="checkbox" id="autoPersonal" checked> Personal details: email addresses, phone and mobile numbers, street and postal addresses, names with a salutation (Mr, Mrs, Dr…), business names (Pty Ltd, P/L, T/As…), and any line labelled Name, Contact, Address, ABN, Licence, DOB and similar</label>
+      <label class="chk"><input type="checkbox" id="autoNames" checked> Possible names: lines made only of two to four capitalised words. Catches most bare names but may also cover the odd heading; remove any box you do not want</label>
+      <div class="row" style="margin-top:6px">
+        <button id="autoRunBtn" class="small" disabled>Run again</button>
+        <span class="count" id="autoCount"></span>
+      </div>
     </div>
 
     <div>
-      <h2>Find and mark text</h2>
+      <h2>Redact an area by hand</h2>
+      <p>Drag on any page to white it out. Hover over a box to peek at what is underneath. Click <b>Export redacted PDF</b> to save a copy with the covered text removed for good.</p>
+      <p>Changed your mind? Click a box to select it, then use its <b>×</b>, press <kbd>Delete</kbd>, or double-click it to remove the box and reveal the text again.</p>
+    </div>
+
+    <div>
+      <h2>Find and redact text</h2>
       <input type="text" id="findInput" placeholder="Name, address, rego…" disabled>
       <div class="row" style="margin-top:8px">
-        <button id="findBtn" class="small" disabled>Mark all matches</button>
+        <button id="findBtn" class="small" disabled>Redact all matches</button>
         <span class="count" id="findCount"></span>
       </div>
       <p style="margin-top:10px">Quick patterns:</p>
@@ -165,21 +182,22 @@
         <button class="small pattern" data-pattern="email" disabled>Email addresses</button>
         <button class="small pattern" data-pattern="phone" disabled>Phone numbers</button>
         <button class="small pattern" data-pattern="vin" disabled>VINs</button>
+        <button class="small pattern" data-pattern="price" disabled>Prices</button>
       </div>
     </div>
 
     <div>
-      <h2>Marks</h2>
+      <h2>Redactions</h2>
       <div class="row">
-        <span class="count" id="markCount">No marks yet</span>
+        <span class="count" id="markCount">Nothing redacted yet</span>
       </div>
       <div class="row">
         <span class="count" id="selCount">Nothing selected</span>
       </div>
       <div class="row">
         <button id="undoBtn" class="small" disabled>Undo</button>
-        <button id="deleteBtn" class="small" disabled>Delete selected</button>
-        <button id="clearBtn" class="small danger" disabled>Clear all</button>
+        <button id="deleteBtn" class="small" disabled>Remove selected box</button>
+        <button id="clearBtn" class="small danger" disabled>Remove all boxes</button>
       </div>
     </div>
 
@@ -193,8 +211,8 @@
     </div>
 
     <div class="note">
-      Export flattens every page to an image with the marked areas painted solid black, then builds a fresh PDF. The text and metadata underneath are removed, not just hidden, so the redacted file is not text-searchable.<br><br>
-      Nothing is uploaded. The only network requests this page makes are to load two open-source libraries (pdf.js and pdf-lib) when it opens.
+      The white boxes on screen are a preview (the red outline is not exported). Export flattens every page to a single picture with those areas painted solid white, then builds a fresh PDF. The exported file has no text, layers, fonts or metadata to peel back, so the covered content cannot be recovered with a PDF editor or image editor. Your original file is never changed.<br><br>
+      Nothing is uploaded. The PDF never leaves this tab. The only network requests are for the page's font and, if the bundled copies in the <code>vendor</code> folder are missing, the two open-source libraries it uses (pdf.js and pdf-lib).
     </div>
   </aside>
 
@@ -226,13 +244,68 @@
 <div class="status" id="status" role="status" aria-live="polite"></div>
 
 <script>
-(function () {
-  if (!window.pdfjsLib || !window.PDFLib) {
-    document.getElementById('status').textContent = 'Clear could not load its PDF libraries. Check the internet connection and reload.';
-    document.getElementById('status').className = 'status show err';
+/* ---------- library loading ----------
+   The libraries are bundled next to this file in vendor/ so the page works with no
+   internet connection. If a bundled copy is missing (for example when index.html has
+   been copied somewhere on its own) the same version is fetched from cdnjs instead. */
+const LIBS = {
+  pdfjs: {
+    local: 'vendor/pdfjs/',
+    cdn: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/',
+    script: 'pdf.min.js', worker: 'pdf.worker.min.js', cmaps: 'cmaps/', fonts: 'standard_fonts/',
+    ready: () => !!window.pdfjsLib,
+  },
+  pdflib: {
+    local: 'vendor/pdf-lib/',
+    cdn: 'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/',
+    script: 'pdf-lib.min.js',
+    ready: () => !!window.PDFLib,
+  },
+};
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const el = document.createElement('script');
+    el.src = src; el.async = false;
+    el.onload = () => resolve(src);
+    el.onerror = () => { el.remove(); reject(new Error('Failed to load ' + src)); };
+    document.head.appendChild(el);
+  });
+}
+
+// Resolve a base (local first, then CDN) for one library. Returns the absolute base URL used.
+async function loadLib(lib) {
+  const bases = [lib.local, lib.cdn];
+  let lastErr;
+  for (const base of bases) {
+    const abs = new URL(base, location.href).href;
+    try {
+      await loadScript(abs + lib.script);
+      if (lib.ready()) return abs;
+      lastErr = new Error('Script loaded but library not found: ' + abs + lib.script);
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr;
+}
+
+(async function boot() {
+  const statusEl = document.getElementById('status');
+  let libs;
+  try {
+    const [pdfjsBase, pdflibBase] = await Promise.all([loadLib(LIBS.pdfjs), loadLib(LIBS.pdflib)]);
+    libs = { pdfjsBase, pdflibBase };
+  } catch (err) {
+    statusEl.textContent = 'Clear could not load its PDF libraries. Keep the vendor folder next to index.html, or check the internet connection, then reload.';
+    statusEl.className = 'status show err';
+    console.error(err);
     return;
   }
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  init(libs);
+})();
+
+function init(libs) {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = libs.pdfjsBase + LIBS.pdfjs.worker;
+  const pdfjsDataUrls = { cMapUrl: libs.pdfjsBase + LIBS.pdfjs.cmaps, cMapPacked: true, standardFontDataUrl: libs.pdfjsBase + LIBS.pdfjs.fonts };
 
   const $ = (id) => document.getElementById(id);
   const els = {
@@ -240,6 +313,7 @@
     findInput: $('findInput'), findBtn: $('findBtn'), findCount: $('findCount'),
     markCount: $('markCount'), selCount: $('selCount'), undoBtn: $('undoBtn'), deleteBtn: $('deleteBtn'), clearBtn: $('clearBtn'),
     zoomIn: $('zoomIn'), zoomOut: $('zoomOut'), zoomFit: $('zoomFit'),
+    autoPrices: $('autoPrices'), autoPayment: $('autoPayment'), autoPersonal: $('autoPersonal'), autoNames: $('autoNames'), autoRunBtn: $('autoRunBtn'), autoCount: $('autoCount'),
     viewer: $('viewer'), drop: $('drop'), pages: $('pages'), status: $('status'),
     patterns: Array.from(document.querySelectorAll('.pattern')),
   };
@@ -263,14 +337,14 @@
     const loaded = !!state.pdf && !state.busy;
     const n = state.marks.length;
     const pagesWithMarks = new Set(state.marks.map(m => m.page)).size;
-    [els.findInput, els.findBtn, els.zoomIn, els.zoomOut, els.zoomFit, ...els.patterns].forEach(e => (e.disabled = !loaded));
+    [els.findInput, els.findBtn, els.zoomIn, els.zoomOut, els.zoomFit, els.autoRunBtn, ...els.patterns].forEach(e => (e.disabled = !loaded));
     els.exportBtn.disabled = !loaded;
     els.undoBtn.disabled = !loaded || state.history.length === 0;
     els.clearBtn.disabled = !loaded || state.marks.length === 0;
     els.deleteBtn.disabled = !loaded || state.selected == null;
     const sel = state.marks.find(m => m.id === state.selected);
-    els.selCount.textContent = sel ? `Selected: mark on page ${sel.page}` : (n ? 'Nothing selected. Click a box to select it.' : 'Nothing selected');
-    els.markCount.textContent = n === 0 ? 'No marks yet' : `${n} mark${n === 1 ? '' : 's'} across ${pagesWithMarks} page${pagesWithMarks === 1 ? '' : 's'}`;
+    els.selCount.textContent = sel ? `Selected: box on page ${sel.page}` : (n ? 'Nothing selected. Click a box to select it.' : 'Nothing selected');
+    els.markCount.textContent = n === 0 ? 'Nothing redacted yet' : `${n} box${n === 1 ? '' : 'es'} across ${pagesWithMarks} page${pagesWithMarks === 1 ? '' : 's'}`;
   }
 
   /* ---------- loading ---------- */
@@ -281,18 +355,19 @@
     status('Opening ' + file.name + '…', { sticky: true });
     try {
       const data = new Uint8Array(await file.arrayBuffer());
-      const pdf = await pdfjsLib.getDocument({ data }).promise;
+      const pdf = await pdfjsLib.getDocument({ data, ...pdfjsDataUrls }).promise;
       if (state.pdf) { try { state.pdf.destroy(); } catch (e) {} }
       state.pdf = pdf; state.pages = []; state.marks = []; state.history = []; state.selected = null;
       state.fileName = file.name;
       els.fileName.textContent = file.name + ' · ' + pdf.numPages + ' page' + (pdf.numPages === 1 ? '' : 's');
       for (let i = 1; i <= pdf.numPages; i++) {
-        state.pages.push({ num: i, page: await pdf.getPage(i), text: null, viewport: null, canvas: null, overlay: null, wrap: null });
+        state.pages.push({ num: i, page: await pdf.getPage(i), text: null, lines: null, viewport: null, canvas: null, overlay: null, wrap: null });
       }
       els.drop.style.display = 'none';
       fitWidth();
       await renderAll();
       hideStatus();
+      await runAutoRules();
     } catch (err) {
       const msg = /password/i.test(String(err && err.name)) || /password/i.test(String(err && err.message))
         ? 'This PDF is password-protected. Remove the password first, then open it here.'
@@ -351,7 +426,8 @@
     let added = 0;
     for (const m of list) {
       if (m.w < 1 || m.h < 1) continue;
-      const dup = state.marks.some(o => o.page === m.page && Math.abs(o.x - m.x) < 0.5 && Math.abs(o.y - m.y) < 0.5 && Math.abs(o.w - m.w) < 0.5 && Math.abs(o.h - m.h) < 0.5);
+      // skip a box that an existing box on the same page already covers entirely
+      const dup = state.marks.some(o => o.page === m.page && o.x <= m.x + 0.5 && o.y <= m.y + 0.5 && o.x + o.w >= m.x + m.w - 0.5 && o.y + o.h >= m.y + m.h - 0.5);
       if (dup) continue;
       const id = state.nextId++;
       state.marks.push({ id, ...m }); added++;
@@ -382,10 +458,10 @@
       const el = document.createElement('div');
       el.className = 'mark' + (m.id === state.selected ? ' selected' : '');
       el.style.left = r.left + 'px'; el.style.top = r.top + 'px'; el.style.width = r.width + 'px'; el.style.height = r.height + 'px';
-      el.dataset.id = m.id; el.title = 'Click to select. Delete key removes it.';
+      el.dataset.id = m.id; el.title = 'Redacted. Click to select; Delete key removes the box.';
       if (m.id === state.selected) {
-        const x = document.createElement('span'); x.className = 'x'; x.textContent = '×'; x.title = 'Remove this mark';
-        x.addEventListener('pointerdown', (e) => { e.stopPropagation(); removeMark(m.id); status('Mark removed'); });
+        const x = document.createElement('span'); x.className = 'x'; x.textContent = '×'; x.title = 'Remove this box';
+        x.addEventListener('pointerdown', (e) => { e.stopPropagation(); removeMark(m.id); status('Box removed. The text is visible again.'); });
         el.appendChild(x);
       }
       p.overlay.appendChild(el);
@@ -421,10 +497,12 @@
       if (d.x1 == null || Math.abs(d.x1 - d.x0) < 4 || Math.abs(d.y1 - d.y0) < 4) return;
       const [ax, ay] = viewToPdf(p, d.x0, d.y0);
       const [bx, by] = viewToPdf(p, d.x1, d.y1);
-      addMarks([{ page: p.num, x: Math.min(ax, bx), y: Math.min(ay, by), w: Math.abs(bx - ax), h: Math.abs(by - ay) }], true);
+      if (addMarks([{ page: p.num, x: Math.min(ax, bx), y: Math.min(ay, by), w: Math.abs(bx - ax), h: Math.abs(by - ay) }], true)) {
+        status('Covered. Click Export redacted PDF to save the file with this text removed.');
+      }
     };
     ov.addEventListener('pointerup', finish);
-    ov.addEventListener('dblclick', (e) => { const el = e.target.closest('.mark'); if (el) { removeMark(Number(el.dataset.id)); status('Mark removed'); } });
+    ov.addEventListener('dblclick', (e) => { const el = e.target.closest('.mark'); if (el) { removeMark(Number(el.dataset.id)); status('Box removed. The text is visible again.'); } });
     ov.addEventListener('pointercancel', finish);
   }
 
@@ -434,15 +512,37 @@
     return p.text.items.filter(it => it.str && it.str.length && it.width > 0);
   }
 
-  // Convert a character span [i, i+len) of a text item into a PDF-space bounding box.
-  function spanToRect(item, i, len) {
-    const [a, b, c, d, e, f] = item.transform;
+  // Where, as fractions of the item's total width, does the character span [i, i+len) start and end?
+  // pdf.js only reports the width of a whole text item, so glyph widths are measured with the
+  // same font it drew the page with (registered in the document under item.fontName), falling
+  // back to the generic family pdf.js suggests. Uniform character widths are the last resort.
+  const measureCtx = document.createElement('canvas').getContext('2d');
+  function spanFractions(p, item, i, len) {
     const n = item.str.length;
+    const uniform = [i / n, len / n];
+    try {
+      const style = p.text && p.text.styles && p.text.styles[item.fontName];
+      const family = [item.fontName ? JSON.stringify(item.fontName) : null, style && style.fontFamily, 'sans-serif'].filter(Boolean).join(', ');
+      const px = Math.max(4, item.height || Math.hypot(item.transform[2], item.transform[3]));
+      measureCtx.font = `${px}px ${family}`;
+      const total = measureCtx.measureText(item.str).width;
+      if (!(total > 0)) return uniform;
+      const start = measureCtx.measureText(item.str.slice(0, i)).width / total;
+      const end = measureCtx.measureText(item.str.slice(0, i + len)).width / total;
+      if (!(end > start)) return uniform;
+      return [start, end - start];
+    } catch (e) { return uniform; }
+  }
+
+  // Convert a character span [i, i+len) of a text item into a PDF-space bounding box.
+  function spanToRect(p, item, i, len) {
+    const [a, b, c, d, e, f] = item.transform;
     let ux = a, uy = b, un = Math.hypot(ux, uy) || 1; ux /= un; uy /= un;      // text direction
     let vx = c, vy = d, vn = Math.hypot(vx, vy) || 1; vx /= vn; vy /= vn;      // up direction
     const w = item.width, h = item.height || Math.hypot(c, d);
-    const s = w * (i / n), l = w * (len / n);
-    const desc = h * 0.25, pad = 1.5;
+    const [fs, fl] = spanFractions(p, item, i, len);
+    const s = w * fs, l = w * fl;
+    const desc = h * 0.25, pad = Math.max(1.5, h * 0.12);
     const x0 = e + ux * s, y0 = f + uy * s;
     const corners = [
       [x0 - vx * desc, y0 - vy * desc],
@@ -455,23 +555,159 @@
     return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
   }
 
-  async function markMatches(matcher, label) {
+  // A PDF often splits one printed line into several text items (a label and its value, or even
+  // single words). Matching runs on whole lines: items sharing a baseline are joined, left to right.
+  async function getLines(p) {
+    if (p.lines) return p.lines;
+    const items = await getItems(p);
+    const info = items.map(it => ({ it, x: it.transform[4], y: it.transform[5], h: it.height || Math.hypot(it.transform[2], it.transform[3]) }))
+      .sort((a, b) => (b.y - a.y) || (a.x - b.x));
+    const lines = [];
+    for (const o of info) {
+      let line = lines.length ? lines[lines.length - 1] : null;
+      if (!line || Math.abs(line.y - o.y) > 0.6 * Math.max(line.h, o.h)) { line = { y: o.y, h: o.h, text: '', parts: [] }; lines.push(line); }
+      if (line.text && !/\s$/.test(line.text) && !/^\s/.test(o.it.str)) line.text += ' ';
+      line.parts.push({ it: o.it, start: line.text.length, end: line.text.length + o.it.str.length });
+      line.text += o.it.str;
+      line.h = Math.max(line.h, o.h);
+    }
+    // Sort the parts of each line by x so the joined text reads left to right, and start a new
+    // segment at any wide gap so that a match cannot bleed from one table column into the next.
+    p.lines = [];
+    for (const line of lines) {
+      line.parts.sort((a, b) => a.it.transform[4] - b.it.transform[4]);
+      let seg = null, prevEnd = null;
+      for (const part of line.parts) {
+        const x = part.it.transform[4];
+        if (!seg || (prevEnd != null && x - prevEnd > 2.5 * line.h)) { seg = { text: '', parts: [] }; p.lines.push(seg); }
+        if (seg.text && !/\s$/.test(seg.text) && !/^\s/.test(part.it.str)) seg.text += ' ';
+        seg.parts.push({ it: part.it, start: seg.text.length, end: seg.text.length + part.it.str.length });
+        seg.text += part.it.str;
+        prevEnd = x + part.it.width;
+      }
+    }
+    return p.lines;
+  }
+
+  // One box covering the characters [start, end) of a joined line, whichever items they fall in.
+  function lineSpanRect(p, line, start, end) {
+    let r = null;
+    for (const part of line.parts) {
+      const a = Math.max(start, part.start), b = Math.min(end, part.end);
+      if (b <= a) continue;
+      const q = spanToRect(p, part.it, a - part.start, b - a);
+      r = r ? { x: Math.min(r.x, q.x), y: Math.min(r.y, q.y), x2: Math.max(r.x2, q.x + q.w), y2: Math.max(r.y2, q.y + q.h) } : { x: q.x, y: q.y, x2: q.x + q.w, y2: q.y + q.h };
+    }
+    return r && { page: p.num, x: r.x, y: r.y, w: r.x2 - r.x, h: r.y2 - r.y };
+  }
+
+  async function markMatches(matcher, label, opts = {}) {
     state.busy = true; refreshControls();
-    status('Searching…', { sticky: true });
+    if (!opts.quiet) status('Searching…', { sticky: true });
     const found = [];
     try {
       for (const p of state.pages) {
-        const items = await getItems(p);
-        for (const it of items) {
-          for (const [i, len] of matcher(it.str)) found.push({ page: p.num, ...spanToRect(it, i, len) });
+        for (const line of await getLines(p)) {
+          for (const [i, len] of matcher(line.text)) { const r = lineSpanRect(p, line, i, i + len); if (r) found.push(r); }
         }
       }
     } finally { state.busy = false; }
     const added = addMarks(found);
-    const msg = found.length ? `${label}: ${found.length} match${found.length === 1 ? '' : 'es'} marked` + (added < found.length ? ` (${found.length - added} already marked)` : '') : `${label}: no matches found`;
-    els.findCount.textContent = msg;
-    status(msg);
+    const msg = found.length ? `${label}: ${found.length} match${found.length === 1 ? '' : 'es'} redacted` + (added < found.length ? ` (${found.length - added} already done)` : '') : `${label}: no matches found`;
+    if (!opts.quiet) { els.findCount.textContent = msg; status(msg); }
     refreshControls();
+    return found.length;
+  }
+
+  // Whole-line rule: cover every line whose text matches, label and value together.
+  async function markLines(re) {
+    state.busy = true; refreshControls();
+    const found = [];
+    try {
+      for (const p of state.pages) {
+        for (const line of await getLines(p)) {
+          re.lastIndex = 0;
+          if (re.test(line.text)) { const r = lineSpanRect(p, line, 0, line.text.length); if (r) found.push(r); }
+        }
+      }
+    } finally { state.busy = false; }
+    addMarks(found);
+    refreshControls();
+    return found.length;
+  }
+
+  const PAYMENT_RE = /payment|paid\b|pay\s?by|amount\s+(?:due|paid|owing|payable|received|tendered)|balance\s+due|total\s+due|due\s+(?:date|by)|\beft\b|bpay|direct\s+(?:deposit|debit)|bank\s+transfer|credit\s+card|debit\s+card|\bcard\b|visa|mastercard|\bamex\b|american\s+express|\bcash\b|cheque|\bcheck\s+no|\bbsb\b|acc(?:oun)?t\s*(?:no|number|name)|\bref(?:erence)?\s*(?:no|number)?\s*[:#]|receipt\s*(?:no|number|#)|tender|change\s+given|surcharge/i;
+
+  // Lines that start with a label whose value is personal: "Name: …", "Contact …", "Attn: …", "ABN …".
+  const PERSONAL_LABEL_RE = /^\s*(?:(?:full|first|given|middle|last|sur|family|customer|client|contact|company|business|trading|driver|owner|purchaser|buyer|seller|vendor|hirer|lessee|licensee|insured|applicant|guarantor|employee|employer|account)\s*names?|name|customer|client|contact|attn|attention|owner|driver|purchaser|buyer|seller|vendor|hirer|lessee|licensee|insured|applicant|guarantor|dear|bill(?:ed)?\s*to|ship(?:ped)?\s*to|deliver(?:ed)?\s*to|sold\s*to|invoice\s*to|address|street|suburb|postcode|post\s*code|state|email|e-mail|phone|telephone|mobile|mob|cell|tel|fax|abn|acn|arbn|tfn|licen[cs]e|dl|drivers?\s*licen[cs]e|passport|medicare|dob|date\s+of\s+birth|d\.o\.b|birth\s*date|age|gender|sex|signature|signed|witness)\b(?!\s*(?:details?|information|info|section|form)\b)\s*(?:no\.?|number|#)?\s*[:.\-–]?\s*\S/i;
+
+  const STREET_TYPES = 'Street|St|Road|Rd|Avenue|Ave?|Drive|Dr|Lane|Ln|Court|Crt|Ct|Place|Pl|Crescent|Cres|Cr|Highway|Hwy|Parade|Pde|Boulevard|Blvd|Bvd|Terrace|Tce|Way|Close|Cl|Circuit|Cct|Esplanade|Esp|Grove|Gr|Square|Sq|Track|Trk|Walk|Row|Rise|Loop|Mews|Parkway|Pwy|Freeway|Fwy|Alley|Arcade|Bend|Chase|Circle|Concourse|Cove|Crossing|Dale|Entrance|Gardens|Gate|Glen|Green|Heights|Hill|Island|Junction|Key|Link|Mall|Nook|Outlook|Pass|Path|Point|Promenade|Quay|Reach|Reserve|Retreat|Ridge|Ring|Run|Strip|Trail|Vale|View|Vista|Waters|Wharf';
+  const AU_STATES = 'NSW|VIC|QLD|SA|WA|TAS|NT|ACT|New South Wales|Victoria|Queensland|South Australia|Western Australia|Tasmania|Northern Territory|Australian Capital Territory';
+  const SALUTATIONS = 'Mr|Mrs|Ms|Miss|Mx|Mstr|Master|Dr|Prof|Professor|Sir|Dame|Lady|Lord|Rev|Reverend|Fr|Father|Sr|Sister|Br|Brother|Hon|Cr|Capt|Captain|Sgt|Lt|Col|Maj|Cmdr';
+  const BUSINESS_SUFFIX = 'Pty\\.?\\s*Ltd\\.?|Pty|P\\/L|Ltd\\.?|Limited|Inc\\.?|Incorporated|LLC|LLP|Corp\\.?|Corporation|Co\\.?|Company|Group|Holdings|Partners|Partnership|Trust|Enterprises|Services|Solutions|Industries|Motors|Automotive|Auto|Fleet|Logistics|Transport|Trading';
+
+  const personalRules = [
+    { key: 'email',    label: 'email addresses', re: /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g },
+    // Australian landline or mobile in any common spacing, or an international number starting with +
+    { key: 'phone',    label: 'phone numbers',   re: /(?:\+?61|\(0\d\)|0)[\s-]?\d(?:[\s-]?\d){7,9}\b|\+\d{1,3}[\s-]?\(?\d+\)?(?:[\s-]?\d){6,11}\b/g },
+    // "Unit 3/12 Smith Street", "12A-14 High St", "Lot 5 Old Coast Road"; a numberless "Flinders Lane" too
+    { key: 'street',   label: 'street addresses', re: new RegExp(String.raw`\b(?:(?:Unit|Suite|Shop|Level|Lvl|Lot|Apt|Apartment|Flat|Villa|Office|Factory|Room|Floor)\s*\w+[,\s/]+\s*)?(?:\d+[A-Za-z]?(?:\s*[-/]\s*\d+[A-Za-z]?)?\s+)?(?:[A-Z][\w'-]*\.?\s+){1,4}(?:${STREET_TYPES})\b\.?(?:(?:[,\s]+[A-Z][A-Za-z' -]+?)?[,\s]+(?:${AU_STATES})\b(?:[,\s]+\d{4}\b)?)?`, 'g') },
+    { key: 'pobox',    label: 'postal addresses', re: /\b(?:P\.?\s?O\.?\s*Box|GPO\s*Box|PO\s*Box|Locked\s*Bag|Private\s*Bag|RMB|RSD)\s*\d+[A-Za-z]?(?:(?:[,\s]+[A-Z][A-Za-z' -]+?)?[,\s]+(?:NSW|VIC|QLD|SA|WA|TAS|NT|ACT)\b(?:[,\s]+\d{4}\b)?)?/gi },
+    // "Melbourne VIC 3000", "FLINDERS LANE VIC  8009", "Sydney, New South Wales 2000"
+    { key: 'suburb',   label: 'suburb lines',    re: new RegExp(String.raw`\b[A-Z][A-Za-z'-]+(?:[ -][A-Za-z'-]+){0,3},?\s+(?:${AU_STATES})\.?,?\s+\d{4}\b`, 'g') },
+    { key: 'postcode', label: 'state and postcode', re: /\b(?:NSW|VIC|QLD|SA|WA|TAS|NT|ACT)\.?,?\s+\d{4}\b/g },
+    // "Mr J Citizen", "Dr Jane A. Citizen-Smith", "Mrs. van der Berg"
+    { key: 'salute',   label: 'names with a salutation', re: new RegExp(String.raw`\b(?:${SALUTATIONS})\.?\s+(?:(?:[A-Z][\w'-]*\.?|van|von|de|der|del|da|di|la|le|du|st\.?|mc|mac|o')\s*){1,4}(?![a-z])`, 'g') },
+    // "Smartfleet P/L T/As Avc Fleet", "Acme Pty Ltd", "Bob's Motors", "Jones & Co."
+    { key: 'business', label: 'business names',  re: new RegExp(String.raw`(?:\b[A-Z][\w&'.-]*\s+){0,5}\b[A-Z][\w&'.-]*\s*\b(?:${BUSINESS_SUFFIX})\b\.?(?:\s*(?:T\/As?|T\/A|Trading\s+As|t\/as)\.?\s+(?:[A-Z][\w&'.-]*\s*){1,5})?|\b[A-Z][\w&'.-]*\s+(?:T\/As?|Trading\s+As)\s+(?:[A-Z][\w&'.-]*\s*){1,5}`, 'g') },
+  ];
+
+  // A line that is only two to four capitalised words and contains none of the words that usually
+  // appear in headings is most likely a person's or company's name written on its own.
+  const NAME_STOP = new Set(('details detail invoice tax receipt statement quote quotation estimate order purchase total subtotal sub gst amount due date description qty quantity unit price rate item items page of and the for to from by with payment payments paid method terms conditions notes note vehicle vehicles car rego registration make model year odometer km service services labour labor parts part number no summary balance account bank bsb card credit debit cash cheque eft direct deposit reference ref customer client supplier vendor contact address phone email fax abn acn thank you your business please pay remittance advice delivery docket report form section signature signed sign here office use only insurance policy claim excess warranty repair repairs inspection quote work works job sheet pads front rear left right side new used fitted supplied replaced replace fit check checked adjust adjusted tyre tyres wheel wheels engine battery filter oil fluid coolant kind regards sincerely faithfully yours manager director').split(' '));
+  function nameLineMatcher(text) {
+    const t = text.trim();
+    if (!/^[A-Z][a-z']+(?:-[A-Z][a-z']+)?(?:\s+(?:[A-Z][a-z']+(?:-[A-Z][a-z']+)?|[A-Z]\.?|van|von|de|der|del|da|di|la|le|du|Mc|Mac|O')){1,3}$/.test(t)) return [];
+    if (t.split(/\s+/).some(w => NAME_STOP.has(w.toLowerCase().replace(/[.'’-]/g, '')))) return [];
+    const i = text.indexOf(t);
+    return [[i, t.length]];
+  }
+
+  /* ---------- automatic rules, run when a PDF opens ---------- */
+  const AUTO_KEY = 'clear.autoRules.v3';
+  function loadAutoRules() {
+    try {
+      const r = JSON.parse(localStorage.getItem(AUTO_KEY) || 'null');
+      if (r) { els.autoPrices.checked = !!r.prices; els.autoPayment.checked = !!r.payment; els.autoPersonal.checked = r.personal !== false; els.autoNames.checked = r.names !== false; }
+    } catch (e) {}
+  }
+  function saveAutoRules() {
+    try { localStorage.setItem(AUTO_KEY, JSON.stringify({ prices: els.autoPrices.checked, payment: els.autoPayment.checked, personal: els.autoPersonal.checked, names: els.autoNames.checked })); } catch (e) {}
+  }
+  async function runAutoRules() {
+    if (!state.pdf) return;
+    const parts = [];
+    status('Applying automatic rules…', { sticky: true });
+    if (els.autoPersonal.checked) {
+      let n = await markLines(PERSONAL_LABEL_RE);
+      for (const rule of personalRules) n += await markMatches(regexMatcher(rule.re), rule.label, { quiet: true });
+      parts.push(`${n} personal detail${n === 1 ? '' : 's'}`);
+    }
+    if (els.autoNames.checked) {
+      const n = await markMatches(nameLineMatcher, 'Possible names', { quiet: true });
+      parts.push(`${n} possible name${n === 1 ? '' : 's'}`);
+    }
+    if (els.autoPayment.checked) {
+      const n = await markLines(PAYMENT_RE);
+      parts.push(`${n} payment line${n === 1 ? '' : 's'}`);
+    }
+    if (els.autoPrices.checked) {
+      const n = await markMatches(regexMatcher(patterns.price.re), patterns.price.label, { quiet: true });
+      parts.push(`${n} price${n === 1 ? '' : 's'}`);
+    }
+    const msg = parts.length ? 'Automatically redacted ' + parts.join(', ') : 'No automatic rules are switched on';
+    els.autoCount.textContent = msg;
+    status(msg);
   }
 
   function literalMatcher(q) {
@@ -486,9 +722,12 @@
     return (str) => { const out = []; let m; re.lastIndex = 0; while ((m = re.exec(str)) !== null) { if (m[0].length) out.push([m.index, m[0].length]); else re.lastIndex++; } return out; };
   }
   const patterns = {
-    email: { label: 'Email addresses', re: /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g },
-    phone: { label: 'Phone numbers', re: /(?:\+?61|\(0\d\)|0)[\s-]?\d(?:[\s-]?\d){7,9}\b/g },
+    email: { label: 'Email addresses', re: personalRules.find(r => r.key === 'email').re },
+    phone: { label: 'Phone numbers', re: personalRules.find(r => r.key === 'phone').re },
     vin:   { label: 'VINs', re: /\b[A-HJ-NPR-Z0-9]{17}\b/g },
+    // "$1,234.56", "$ 99", "AUD 1,000", "A$12.50", a bare "1,234.00", or a "$" on its own (invoices often
+    // put the sign in a separate column). Anything with a currency sign or two decimals is treated as a price.
+    price: { label: 'Prices', re: /(?:A?\$|AUD\s?\$?)\s?\d[\d,]*(?:\.\d{1,2})?|\b\d{1,3}(?:,\d{3})*\.\d{2}\b|(?<![\w.])A?\$(?![\w.])/g },
   };
 
   /* ---------- export ---------- */
@@ -509,7 +748,7 @@
         const ctx = c.getContext('2d');
         ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
         await p.page.render({ canvasContext: ctx, viewport: vp }).promise;
-        ctx.fillStyle = '#000';
+        ctx.fillStyle = '#fff';
         for (const m of state.marks) {
           if (m.page !== p.num) continue;
           const [x1, y1, x2, y2] = vp.convertToViewportRectangle([m.x, m.y, m.x + m.w, m.y + m.h]);
@@ -528,7 +767,7 @@
       a.href = url; a.download = state.fileName.replace(/\.pdf$/i, '') + '-redacted.pdf';
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10000);
-      status(`Exported ${a.download}`);
+      status(`Saved ${a.download} with the covered text removed. Check your downloads folder.`);
     } catch (err) {
       status('Export failed. ' + (err && err.message ? err.message : ''), { error: true });
     } finally { state.busy = false; refreshControls(); }
@@ -542,10 +781,13 @@
   els.findBtn.addEventListener('click', () => { const q = els.findInput.value.trim(); if (q) markMatches(literalMatcher(q), `"${q}"`); });
   els.findInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') els.findBtn.click(); });
   els.patterns.forEach(b => b.addEventListener('click', () => { const pt = patterns[b.dataset.pattern]; markMatches(regexMatcher(pt.re), pt.label); }));
+  loadAutoRules();
+  [els.autoPrices, els.autoPayment, els.autoPersonal, els.autoNames].forEach(e => e.addEventListener('change', saveAutoRules));
+  els.autoRunBtn.addEventListener('click', runAutoRules);
 
   els.undoBtn.addEventListener('click', undo);
-  els.deleteBtn.addEventListener('click', () => { if (state.selected != null) { removeMark(state.selected); status('Mark removed'); } });
-  els.clearBtn.addEventListener('click', () => { if (!state.marks.length) return; snapshot(); state.marks = []; state.selected = null; redrawAll(); status('All marks cleared'); });
+  els.deleteBtn.addEventListener('click', () => { if (state.selected != null) { removeMark(state.selected); status('Box removed. The text is visible again.'); } });
+  els.clearBtn.addEventListener('click', () => { if (!state.marks.length) return; snapshot(); state.marks = []; state.selected = null; redrawAll(); status('All boxes removed'); });
 
   async function setScale(s) { state.scale = Math.max(0.3, Math.min(4, s)); state.busy = true; refreshControls(); await renderAll(); state.busy = false; refreshControls(); }
   els.zoomIn.addEventListener('click', () => setScale(state.scale * 1.25));
@@ -554,7 +796,7 @@
 
   document.addEventListener('keydown', (e) => {
     const typing = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA');
-    if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && state.selected != null) { e.preventDefault(); removeMark(state.selected); }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && state.selected != null) { e.preventDefault(); removeMark(state.selected); status('Box removed. The text is visible again.'); }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); undo(); }
     if (e.key === 'Escape') { state.selected = null; redrawAll(); }
   });
@@ -569,7 +811,8 @@
   window.addEventListener('beforeunload', (e) => { if (state.marks.length) { e.preventDefault(); e.returnValue = ''; } });
 
   refreshControls();
-})();
+  window.clearState = state; // read-only hook for automated tests
+}
 </script>
 </body>
 </html>
