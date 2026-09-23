@@ -75,10 +75,12 @@
   .page .pnum { position: absolute; left: 0; top: -20px; font-size: 12px; color: var(--muted); }
   .overlay { position: absolute; inset: 0; cursor: crosshair; touch-action: none; user-select: none; }
   .mark {
-    position: absolute; background: var(--red-soft); border: 1.5px solid var(--red);
-    cursor: pointer; box-sizing: border-box;
+    position: absolute; background: #000; border: 1.5px solid var(--red);
+    cursor: pointer; box-sizing: border-box; transition: background .12s;
   }
-  .mark.selected { border-width: 2.5px; background: rgba(200, 16, 46, 0.55); outline: 2px solid #fff; box-shadow: 0 0 0 4px rgba(0,0,0,.35); }
+  .mark:hover { background: rgba(0, 0, 0, 0.35); }                       /* peek at what is underneath */
+  .mark.selected { border-width: 2.5px; outline: 2px solid #fff; box-shadow: 0 0 0 4px var(--red); }
+  .mark.temp { background: var(--red-soft); }
   .mark .x {
     position: absolute; top: -12px; right: -12px; width: 24px; height: 24px; border-radius: 50%;
     background: #000; color: #fff; border: 2px solid #fff; display: none; align-items: center; justify-content: center;
@@ -86,6 +88,7 @@
   }
   .mark.selected .x { display: flex; }
   .mark.temp { pointer-events: none; }
+  code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px; }
 
   .drop {
     height: 100%; min-height: 60vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -147,15 +150,16 @@
 <main>
   <aside>
     <div>
-      <h2>Draw a box</h2>
-      <p>Drag on any page to cover an area. A new box is selected as soon as you draw it. Click any box to select it, then use its <b>×</b>, press <kbd>Delete</kbd>, or double-click it to remove it.</p>
+      <h2>Black out an area</h2>
+      <p>Drag on any page to black it out. Hover over a box to peek at what is underneath. Click <b>Export redacted PDF</b> to save a copy with the blacked-out text removed for good.</p>
+      <p>Changed your mind? Click a box to select it, then use its <b>×</b>, press <kbd>Delete</kbd>, or double-click it to remove the box and reveal the text again.</p>
     </div>
 
     <div>
-      <h2>Find and mark text</h2>
+      <h2>Find and black out text</h2>
       <input type="text" id="findInput" placeholder="Name, address, rego…" disabled>
       <div class="row" style="margin-top:8px">
-        <button id="findBtn" class="small" disabled>Mark all matches</button>
+        <button id="findBtn" class="small" disabled>Black out all matches</button>
         <span class="count" id="findCount"></span>
       </div>
       <p style="margin-top:10px">Quick patterns:</p>
@@ -167,17 +171,17 @@
     </div>
 
     <div>
-      <h2>Marks</h2>
+      <h2>Redactions</h2>
       <div class="row">
-        <span class="count" id="markCount">No marks yet</span>
+        <span class="count" id="markCount">Nothing blacked out yet</span>
       </div>
       <div class="row">
         <span class="count" id="selCount">Nothing selected</span>
       </div>
       <div class="row">
         <button id="undoBtn" class="small" disabled>Undo</button>
-        <button id="deleteBtn" class="small" disabled>Delete selected</button>
-        <button id="clearBtn" class="small danger" disabled>Clear all</button>
+        <button id="deleteBtn" class="small" disabled>Remove selected box</button>
+        <button id="clearBtn" class="small danger" disabled>Remove all boxes</button>
       </div>
     </div>
 
@@ -191,7 +195,7 @@
     </div>
 
     <div class="note">
-      Export flattens every page to an image with the marked areas painted solid black, then builds a fresh PDF. The text and metadata underneath are removed, not just hidden, so the redacted file is not text-searchable.<br><br>
+      The black boxes on screen are a preview. Export flattens every page to an image with those areas painted solid black, then builds a fresh PDF. The text and metadata underneath are removed, not just hidden, so the redacted file is not text-searchable. Your original file is never changed.<br><br>
       Nothing is uploaded. The PDF never leaves this tab. The only network requests are for the page's font and, if the bundled copies in the <code>vendor</code> folder are missing, the two open-source libraries it uses (pdf.js and pdf-lib).
     </div>
   </aside>
@@ -322,8 +326,8 @@ function init(libs) {
     els.clearBtn.disabled = !loaded || state.marks.length === 0;
     els.deleteBtn.disabled = !loaded || state.selected == null;
     const sel = state.marks.find(m => m.id === state.selected);
-    els.selCount.textContent = sel ? `Selected: mark on page ${sel.page}` : (n ? 'Nothing selected. Click a box to select it.' : 'Nothing selected');
-    els.markCount.textContent = n === 0 ? 'No marks yet' : `${n} mark${n === 1 ? '' : 's'} across ${pagesWithMarks} page${pagesWithMarks === 1 ? '' : 's'}`;
+    els.selCount.textContent = sel ? `Selected: box on page ${sel.page}` : (n ? 'Nothing selected. Click a box to select it.' : 'Nothing selected');
+    els.markCount.textContent = n === 0 ? 'Nothing blacked out yet' : `${n} box${n === 1 ? '' : 'es'} across ${pagesWithMarks} page${pagesWithMarks === 1 ? '' : 's'}`;
   }
 
   /* ---------- loading ---------- */
@@ -435,10 +439,10 @@ function init(libs) {
       const el = document.createElement('div');
       el.className = 'mark' + (m.id === state.selected ? ' selected' : '');
       el.style.left = r.left + 'px'; el.style.top = r.top + 'px'; el.style.width = r.width + 'px'; el.style.height = r.height + 'px';
-      el.dataset.id = m.id; el.title = 'Click to select. Delete key removes it.';
+      el.dataset.id = m.id; el.title = 'Blacked out. Click to select; Delete key removes the box.';
       if (m.id === state.selected) {
-        const x = document.createElement('span'); x.className = 'x'; x.textContent = '×'; x.title = 'Remove this mark';
-        x.addEventListener('pointerdown', (e) => { e.stopPropagation(); removeMark(m.id); status('Mark removed'); });
+        const x = document.createElement('span'); x.className = 'x'; x.textContent = '×'; x.title = 'Remove this box';
+        x.addEventListener('pointerdown', (e) => { e.stopPropagation(); removeMark(m.id); status('Box removed. The text is visible again.'); });
         el.appendChild(x);
       }
       p.overlay.appendChild(el);
@@ -474,10 +478,12 @@ function init(libs) {
       if (d.x1 == null || Math.abs(d.x1 - d.x0) < 4 || Math.abs(d.y1 - d.y0) < 4) return;
       const [ax, ay] = viewToPdf(p, d.x0, d.y0);
       const [bx, by] = viewToPdf(p, d.x1, d.y1);
-      addMarks([{ page: p.num, x: Math.min(ax, bx), y: Math.min(ay, by), w: Math.abs(bx - ax), h: Math.abs(by - ay) }], true);
+      if (addMarks([{ page: p.num, x: Math.min(ax, bx), y: Math.min(ay, by), w: Math.abs(bx - ax), h: Math.abs(by - ay) }], true)) {
+        status('Blacked out. Click Export redacted PDF to save the file with this text removed.');
+      }
     };
     ov.addEventListener('pointerup', finish);
-    ov.addEventListener('dblclick', (e) => { const el = e.target.closest('.mark'); if (el) { removeMark(Number(el.dataset.id)); status('Mark removed'); } });
+    ov.addEventListener('dblclick', (e) => { const el = e.target.closest('.mark'); if (el) { removeMark(Number(el.dataset.id)); status('Box removed. The text is visible again.'); } });
     ov.addEventListener('pointercancel', finish);
   }
 
@@ -543,7 +549,7 @@ function init(libs) {
       }
     } finally { state.busy = false; }
     const added = addMarks(found);
-    const msg = found.length ? `${label}: ${found.length} match${found.length === 1 ? '' : 'es'} marked` + (added < found.length ? ` (${found.length - added} already marked)` : '') : `${label}: no matches found`;
+    const msg = found.length ? `${label}: ${found.length} match${found.length === 1 ? '' : 'es'} blacked out` + (added < found.length ? ` (${found.length - added} already done)` : '') : `${label}: no matches found`;
     els.findCount.textContent = msg;
     status(msg);
     refreshControls();
@@ -603,7 +609,7 @@ function init(libs) {
       a.href = url; a.download = state.fileName.replace(/\.pdf$/i, '') + '-redacted.pdf';
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10000);
-      status(`Exported ${a.download}`);
+      status(`Saved ${a.download} with the blacked-out text removed. Check your downloads folder.`);
     } catch (err) {
       status('Export failed. ' + (err && err.message ? err.message : ''), { error: true });
     } finally { state.busy = false; refreshControls(); }
@@ -619,8 +625,8 @@ function init(libs) {
   els.patterns.forEach(b => b.addEventListener('click', () => { const pt = patterns[b.dataset.pattern]; markMatches(regexMatcher(pt.re), pt.label); }));
 
   els.undoBtn.addEventListener('click', undo);
-  els.deleteBtn.addEventListener('click', () => { if (state.selected != null) { removeMark(state.selected); status('Mark removed'); } });
-  els.clearBtn.addEventListener('click', () => { if (!state.marks.length) return; snapshot(); state.marks = []; state.selected = null; redrawAll(); status('All marks cleared'); });
+  els.deleteBtn.addEventListener('click', () => { if (state.selected != null) { removeMark(state.selected); status('Box removed. The text is visible again.'); } });
+  els.clearBtn.addEventListener('click', () => { if (!state.marks.length) return; snapshot(); state.marks = []; state.selected = null; redrawAll(); status('All boxes removed'); });
 
   async function setScale(s) { state.scale = Math.max(0.3, Math.min(4, s)); state.busy = true; refreshControls(); await renderAll(); state.busy = false; refreshControls(); }
   els.zoomIn.addEventListener('click', () => setScale(state.scale * 1.25));
@@ -629,7 +635,7 @@ function init(libs) {
 
   document.addEventListener('keydown', (e) => {
     const typing = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA');
-    if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && state.selected != null) { e.preventDefault(); removeMark(state.selected); }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && state.selected != null) { e.preventDefault(); removeMark(state.selected); status('Box removed. The text is visible again.'); }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); undo(); }
     if (e.key === 'Escape') { state.selected = null; redrawAll(); }
   });

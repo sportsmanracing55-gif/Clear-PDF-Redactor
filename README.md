@@ -22,15 +22,19 @@ Any other static host works the same way: upload `index.html` and the `vendor` f
 ## How it works
 
 1. **Open a PDF** with the button or by dropping it onto the page.
-2. **Mark areas** by dragging a box on any page, or type text and press
-   *Mark all matches*. Quick patterns mark email addresses, Australian phone
-   numbers and vehicle identification numbers (VINs) in one click.
-3. Click a box to select it, then remove it with its **×**, the *Delete* key, or
-   a double-click. *Undo* (also Ctrl/Cmd+Z) steps back through changes.
-4. **Export redacted PDF** flattens every page to an image with the marked areas
-   painted solid black and builds a fresh PDF called `<name>-redacted.pdf`.
-   The original text, fonts and metadata are not carried across, so nothing under
-   a black box can be recovered and the output is not text-searchable.
+2. **Black out areas** by dragging a box on any page, or type text and press
+   *Black out all matches*. Quick patterns black out email addresses, Australian
+   phone numbers and vehicle identification numbers (VINs) in one click. Hover
+   over a box to peek at what is underneath.
+3. To un-redact something, click its box to select it, then remove the box with
+   its **×**, the *Delete* key, or a double-click. *Undo* (also Ctrl/Cmd+Z)
+   steps back through changes.
+4. **Export redacted PDF** is what actually removes the text. It flattens every
+   page to an image with the blacked-out areas painted solid black and builds a
+   fresh PDF called `<name>-redacted.pdf` in your downloads folder. The original
+   text, fonts and metadata are not carried across, so nothing under a black box
+   can be recovered and the output is not text-searchable. Your original file is
+   never changed.
 
 Password-protected PDFs must have the password removed before they can be opened.
 
