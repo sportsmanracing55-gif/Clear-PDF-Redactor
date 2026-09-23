@@ -156,6 +156,8 @@
       <p>Applied to every PDF the moment it opens. Use <b>Run again</b> after removing boxes.</p>
       <label class="chk"><input type="checkbox" id="autoPrices" checked> All prices and dollar amounts</label>
       <label class="chk"><input type="checkbox" id="autoPayment" checked> Payment details: any line mentioning a payment method, amount paid or due, card, EFT, BPAY, BSB or account details</label>
+      <label class="chk"><input type="checkbox" id="autoPersonal" checked> Personal details: email addresses, phone and mobile numbers, street and postal addresses, names with a salutation (Mr, Mrs, Dr…), business names (Pty Ltd, P/L, T/As…), and any line labelled Name, Contact, Address, ABN, Licence, DOB and similar</label>
+      <label class="chk"><input type="checkbox" id="autoNames" checked> Possible names: lines made only of two to four capitalised words. Catches most bare names but may also cover the odd heading; remove any box you do not want</label>
       <div class="row" style="margin-top:6px">
         <button id="autoRunBtn" class="small" disabled>Run again</button>
         <span class="count" id="autoCount"></span>
@@ -311,7 +313,7 @@ function init(libs) {
     findInput: $('findInput'), findBtn: $('findBtn'), findCount: $('findCount'),
     markCount: $('markCount'), selCount: $('selCount'), undoBtn: $('undoBtn'), deleteBtn: $('deleteBtn'), clearBtn: $('clearBtn'),
     zoomIn: $('zoomIn'), zoomOut: $('zoomOut'), zoomFit: $('zoomFit'),
-    autoPrices: $('autoPrices'), autoPayment: $('autoPayment'), autoRunBtn: $('autoRunBtn'), autoCount: $('autoCount'),
+    autoPrices: $('autoPrices'), autoPayment: $('autoPayment'), autoPersonal: $('autoPersonal'), autoNames: $('autoNames'), autoRunBtn: $('autoRunBtn'), autoCount: $('autoCount'),
     viewer: $('viewer'), drop: $('drop'), pages: $('pages'), status: $('status'),
     patterns: Array.from(document.querySelectorAll('.pattern')),
   };
@@ -359,7 +361,7 @@ function init(libs) {
       state.fileName = file.name;
       els.fileName.textContent = file.name + ' · ' + pdf.numPages + ' page' + (pdf.numPages === 1 ? '' : 's');
       for (let i = 1; i <= pdf.numPages; i++) {
-        state.pages.push({ num: i, page: await pdf.getPage(i), text: null, viewport: null, canvas: null, overlay: null, wrap: null });
+        state.pages.push({ num: i, page: await pdf.getPage(i), text: null, lines: null, viewport: null, canvas: null, overlay: null, wrap: null });
       }
       els.drop.style.display = 'none';
       fitWidth();
@@ -424,7 +426,8 @@ function init(libs) {
     let added = 0;
     for (const m of list) {
       if (m.w < 1 || m.h < 1) continue;
-      const dup = state.marks.some(o => o.page === m.page && Math.abs(o.x - m.x) < 0.5 && Math.abs(o.y - m.y) < 0.5 && Math.abs(o.w - m.w) < 0.5 && Math.abs(o.h - m.h) < 0.5);
+      // skip a box that an existing box on the same page already covers entirely
+      const dup = state.marks.some(o => o.page === m.page && o.x <= m.x + 0.5 && o.y <= m.y + 0.5 && o.x + o.w >= m.x + m.w - 0.5 && o.y + o.h >= m.y + m.h - 0.5);
       if (dup) continue;
       const id = state.nextId++;
       state.marks.push({ id, ...m }); added++;
@@ -552,53 +555,81 @@ function init(libs) {
     return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
   }
 
-  async function markMatches(matcher, label) {
+  // A PDF often splits one printed line into several text items (a label and its value, or even
+  // single words). Matching runs on whole lines: items sharing a baseline are joined, left to right.
+  async function getLines(p) {
+    if (p.lines) return p.lines;
+    const items = await getItems(p);
+    const info = items.map(it => ({ it, x: it.transform[4], y: it.transform[5], h: it.height || Math.hypot(it.transform[2], it.transform[3]) }))
+      .sort((a, b) => (b.y - a.y) || (a.x - b.x));
+    const lines = [];
+    for (const o of info) {
+      let line = lines.length ? lines[lines.length - 1] : null;
+      if (!line || Math.abs(line.y - o.y) > 0.6 * Math.max(line.h, o.h)) { line = { y: o.y, h: o.h, text: '', parts: [] }; lines.push(line); }
+      if (line.text && !/\s$/.test(line.text) && !/^\s/.test(o.it.str)) line.text += ' ';
+      line.parts.push({ it: o.it, start: line.text.length, end: line.text.length + o.it.str.length });
+      line.text += o.it.str;
+      line.h = Math.max(line.h, o.h);
+    }
+    // Sort the parts of each line by x so the joined text reads left to right, and start a new
+    // segment at any wide gap so that a match cannot bleed from one table column into the next.
+    p.lines = [];
+    for (const line of lines) {
+      line.parts.sort((a, b) => a.it.transform[4] - b.it.transform[4]);
+      let seg = null, prevEnd = null;
+      for (const part of line.parts) {
+        const x = part.it.transform[4];
+        if (!seg || (prevEnd != null && x - prevEnd > 2.5 * line.h)) { seg = { text: '', parts: [] }; p.lines.push(seg); }
+        if (seg.text && !/\s$/.test(seg.text) && !/^\s/.test(part.it.str)) seg.text += ' ';
+        seg.parts.push({ it: part.it, start: seg.text.length, end: seg.text.length + part.it.str.length });
+        seg.text += part.it.str;
+        prevEnd = x + part.it.width;
+      }
+    }
+    return p.lines;
+  }
+
+  // One box covering the characters [start, end) of a joined line, whichever items they fall in.
+  function lineSpanRect(p, line, start, end) {
+    let r = null;
+    for (const part of line.parts) {
+      const a = Math.max(start, part.start), b = Math.min(end, part.end);
+      if (b <= a) continue;
+      const q = spanToRect(p, part.it, a - part.start, b - a);
+      r = r ? { x: Math.min(r.x, q.x), y: Math.min(r.y, q.y), x2: Math.max(r.x2, q.x + q.w), y2: Math.max(r.y2, q.y + q.h) } : { x: q.x, y: q.y, x2: q.x + q.w, y2: q.y + q.h };
+    }
+    return r && { page: p.num, x: r.x, y: r.y, w: r.x2 - r.x, h: r.y2 - r.y };
+  }
+
+  async function markMatches(matcher, label, opts = {}) {
     state.busy = true; refreshControls();
-    status('Searching…', { sticky: true });
+    if (!opts.quiet) status('Searching…', { sticky: true });
     const found = [];
     try {
       for (const p of state.pages) {
-        const items = await getItems(p);
-        for (const it of items) {
-          for (const [i, len] of matcher(it.str)) found.push({ page: p.num, ...spanToRect(p, it, i, len) });
+        for (const line of await getLines(p)) {
+          for (const [i, len] of matcher(line.text)) { const r = lineSpanRect(p, line, i, i + len); if (r) found.push(r); }
         }
       }
     } finally { state.busy = false; }
     const added = addMarks(found);
     const msg = found.length ? `${label}: ${found.length} match${found.length === 1 ? '' : 'es'} redacted` + (added < found.length ? ` (${found.length - added} already done)` : '') : `${label}: no matches found`;
-    els.findCount.textContent = msg;
-    status(msg);
+    if (!opts.quiet) { els.findCount.textContent = msg; status(msg); }
     refreshControls();
     return found.length;
   }
 
-  /* ---------- whole-line rule: any line whose text matches, label and value together ---------- */
-  // For every text item matching the pattern, cover that item plus everything else sitting on the
-  // same baseline (a label in one column and its value in the next are usually separate items).
-  function lineRects(p, items, re) {
-    const info = items.map(it => ({ it, x: it.transform[4], y: it.transform[5], h: it.height || Math.hypot(it.transform[2], it.transform[3]) }));
-    const rects = [];
-    const done = new Set();
-    for (const hit of info) {
-      re.lastIndex = 0;
-      if (!re.test(hit.it.str) || done.has(hit)) continue;
-      const row = info.filter(o => Math.abs(o.y - hit.y) < 0.6 * Math.max(hit.h, o.h));
-      let r = null;
-      for (const o of row) {
-        done.add(o);
-        const q = spanToRect(p, o.it, 0, o.it.str.length);
-        r = r ? { x: Math.min(r.x, q.x), y: Math.min(r.y, q.y), x2: Math.max(r.x2, q.x + q.w), y2: Math.max(r.y2, q.y + q.h) } : { x: q.x, y: q.y, x2: q.x + q.w, y2: q.y + q.h };
-      }
-      rects.push({ page: p.num, x: r.x, y: r.y, w: r.x2 - r.x, h: r.y2 - r.y });
-    }
-    return rects;
-  }
-
+  // Whole-line rule: cover every line whose text matches, label and value together.
   async function markLines(re) {
     state.busy = true; refreshControls();
     const found = [];
     try {
-      for (const p of state.pages) found.push(...lineRects(p, await getItems(p), re));
+      for (const p of state.pages) {
+        for (const line of await getLines(p)) {
+          re.lastIndex = 0;
+          if (re.test(line.text)) { const r = lineSpanRect(p, line, 0, line.text.length); if (r) found.push(r); }
+        }
+      }
     } finally { state.busy = false; }
     addMarks(found);
     refreshControls();
@@ -607,29 +638,74 @@ function init(libs) {
 
   const PAYMENT_RE = /payment|paid\b|pay\s?by|amount\s+(?:due|paid|owing|payable|received|tendered)|balance\s+due|total\s+due|due\s+(?:date|by)|\beft\b|bpay|direct\s+(?:deposit|debit)|bank\s+transfer|credit\s+card|debit\s+card|\bcard\b|visa|mastercard|\bamex\b|american\s+express|\bcash\b|cheque|\bcheck\s+no|\bbsb\b|acc(?:oun)?t\s*(?:no|number|name)|\bref(?:erence)?\s*(?:no|number)?\s*[:#]|receipt\s*(?:no|number|#)|tender|change\s+given|surcharge/i;
 
+  // Lines that start with a label whose value is personal: "Name: …", "Contact …", "Attn: …", "ABN …".
+  const PERSONAL_LABEL_RE = /^\s*(?:(?:full|first|given|middle|last|sur|family|customer|client|contact|company|business|trading|driver|owner|purchaser|buyer|seller|vendor|hirer|lessee|licensee|insured|applicant|guarantor|employee|employer|account)\s*names?|name|customer|client|contact|attn|attention|owner|driver|purchaser|buyer|seller|vendor|hirer|lessee|licensee|insured|applicant|guarantor|dear|bill(?:ed)?\s*to|ship(?:ped)?\s*to|deliver(?:ed)?\s*to|sold\s*to|invoice\s*to|address|street|suburb|postcode|post\s*code|state|email|e-mail|phone|telephone|mobile|mob|cell|tel|fax|abn|acn|arbn|tfn|licen[cs]e|dl|drivers?\s*licen[cs]e|passport|medicare|dob|date\s+of\s+birth|d\.o\.b|birth\s*date|age|gender|sex|signature|signed|witness)\b(?!\s*(?:details?|information|info|section|form)\b)\s*(?:no\.?|number|#)?\s*[:.\-–]?\s*\S/i;
+
+  const STREET_TYPES = 'Street|St|Road|Rd|Avenue|Ave?|Drive|Dr|Lane|Ln|Court|Crt|Ct|Place|Pl|Crescent|Cres|Cr|Highway|Hwy|Parade|Pde|Boulevard|Blvd|Bvd|Terrace|Tce|Way|Close|Cl|Circuit|Cct|Esplanade|Esp|Grove|Gr|Square|Sq|Track|Trk|Walk|Row|Rise|Loop|Mews|Parkway|Pwy|Freeway|Fwy|Alley|Arcade|Bend|Chase|Circle|Concourse|Cove|Crossing|Dale|Entrance|Gardens|Gate|Glen|Green|Heights|Hill|Island|Junction|Key|Link|Mall|Nook|Outlook|Pass|Path|Point|Promenade|Quay|Reach|Reserve|Retreat|Ridge|Ring|Run|Strip|Trail|Vale|View|Vista|Waters|Wharf';
+  const AU_STATES = 'NSW|VIC|QLD|SA|WA|TAS|NT|ACT|New South Wales|Victoria|Queensland|South Australia|Western Australia|Tasmania|Northern Territory|Australian Capital Territory';
+  const SALUTATIONS = 'Mr|Mrs|Ms|Miss|Mx|Mstr|Master|Dr|Prof|Professor|Sir|Dame|Lady|Lord|Rev|Reverend|Fr|Father|Sr|Sister|Br|Brother|Hon|Cr|Capt|Captain|Sgt|Lt|Col|Maj|Cmdr';
+  const BUSINESS_SUFFIX = 'Pty\\.?\\s*Ltd\\.?|Pty|P\\/L|Ltd\\.?|Limited|Inc\\.?|Incorporated|LLC|LLP|Corp\\.?|Corporation|Co\\.?|Company|Group|Holdings|Partners|Partnership|Trust|Enterprises|Services|Solutions|Industries|Motors|Automotive|Auto|Fleet|Logistics|Transport|Trading';
+
+  const personalRules = [
+    { key: 'email',    label: 'email addresses', re: /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g },
+    // Australian landline or mobile in any common spacing, or an international number starting with +
+    { key: 'phone',    label: 'phone numbers',   re: /(?:\+?61|\(0\d\)|0)[\s-]?\d(?:[\s-]?\d){7,9}\b|\+\d{1,3}[\s-]?\(?\d+\)?(?:[\s-]?\d){6,11}\b/g },
+    // "Unit 3/12 Smith Street", "12A-14 High St", "Lot 5 Old Coast Road"; a numberless "Flinders Lane" too
+    { key: 'street',   label: 'street addresses', re: new RegExp(String.raw`\b(?:(?:Unit|Suite|Shop|Level|Lvl|Lot|Apt|Apartment|Flat|Villa|Office|Factory|Room|Floor)\s*\w+[,\s/]+\s*)?(?:\d+[A-Za-z]?(?:\s*[-/]\s*\d+[A-Za-z]?)?\s+)?(?:[A-Z][\w'-]*\.?\s+){1,4}(?:${STREET_TYPES})\b\.?(?:(?:[,\s]+[A-Z][A-Za-z' -]+?)?[,\s]+(?:${AU_STATES})\b(?:[,\s]+\d{4}\b)?)?`, 'g') },
+    { key: 'pobox',    label: 'postal addresses', re: /\b(?:P\.?\s?O\.?\s*Box|GPO\s*Box|PO\s*Box|Locked\s*Bag|Private\s*Bag|RMB|RSD)\s*\d+[A-Za-z]?(?:(?:[,\s]+[A-Z][A-Za-z' -]+?)?[,\s]+(?:NSW|VIC|QLD|SA|WA|TAS|NT|ACT)\b(?:[,\s]+\d{4}\b)?)?/gi },
+    // "Melbourne VIC 3000", "FLINDERS LANE VIC  8009", "Sydney, New South Wales 2000"
+    { key: 'suburb',   label: 'suburb lines',    re: new RegExp(String.raw`\b[A-Z][A-Za-z'-]+(?:[ -][A-Za-z'-]+){0,3},?\s+(?:${AU_STATES})\.?,?\s+\d{4}\b`, 'g') },
+    { key: 'postcode', label: 'state and postcode', re: /\b(?:NSW|VIC|QLD|SA|WA|TAS|NT|ACT)\.?,?\s+\d{4}\b/g },
+    // "Mr J Citizen", "Dr Jane A. Citizen-Smith", "Mrs. van der Berg"
+    { key: 'salute',   label: 'names with a salutation', re: new RegExp(String.raw`\b(?:${SALUTATIONS})\.?\s+(?:(?:[A-Z][\w'-]*\.?|van|von|de|der|del|da|di|la|le|du|st\.?|mc|mac|o')\s*){1,4}(?![a-z])`, 'g') },
+    // "Smartfleet P/L T/As Avc Fleet", "Acme Pty Ltd", "Bob's Motors", "Jones & Co."
+    { key: 'business', label: 'business names',  re: new RegExp(String.raw`(?:\b[A-Z][\w&'.-]*\s+){0,5}\b[A-Z][\w&'.-]*\s*\b(?:${BUSINESS_SUFFIX})\b\.?(?:\s*(?:T\/As?|T\/A|Trading\s+As|t\/as)\.?\s+(?:[A-Z][\w&'.-]*\s*){1,5})?|\b[A-Z][\w&'.-]*\s+(?:T\/As?|Trading\s+As)\s+(?:[A-Z][\w&'.-]*\s*){1,5}`, 'g') },
+  ];
+
+  // A line that is only two to four capitalised words and contains none of the words that usually
+  // appear in headings is most likely a person's or company's name written on its own.
+  const NAME_STOP = new Set(('details detail invoice tax receipt statement quote quotation estimate order purchase total subtotal sub gst amount due date description qty quantity unit price rate item items page of and the for to from by with payment payments paid method terms conditions notes note vehicle vehicles car rego registration make model year odometer km service services labour labor parts part number no summary balance account bank bsb card credit debit cash cheque eft direct deposit reference ref customer client supplier vendor contact address phone email fax abn acn thank you your business please pay remittance advice delivery docket report form section signature signed sign here office use only insurance policy claim excess warranty repair repairs inspection quote work works job sheet pads front rear left right side new used fitted supplied replaced replace fit check checked adjust adjusted tyre tyres wheel wheels engine battery filter oil fluid coolant kind regards sincerely faithfully yours manager director').split(' '));
+  function nameLineMatcher(text) {
+    const t = text.trim();
+    if (!/^[A-Z][a-z']+(?:-[A-Z][a-z']+)?(?:\s+(?:[A-Z][a-z']+(?:-[A-Z][a-z']+)?|[A-Z]\.?|van|von|de|der|del|da|di|la|le|du|Mc|Mac|O')){1,3}$/.test(t)) return [];
+    if (t.split(/\s+/).some(w => NAME_STOP.has(w.toLowerCase().replace(/[.'’-]/g, '')))) return [];
+    const i = text.indexOf(t);
+    return [[i, t.length]];
+  }
+
   /* ---------- automatic rules, run when a PDF opens ---------- */
-  const AUTO_KEY = 'clear.autoRules.v2';
+  const AUTO_KEY = 'clear.autoRules.v3';
   function loadAutoRules() {
     try {
       const r = JSON.parse(localStorage.getItem(AUTO_KEY) || 'null');
-      if (r) { els.autoPrices.checked = !!r.prices; els.autoPayment.checked = !!r.payment; }
+      if (r) { els.autoPrices.checked = !!r.prices; els.autoPayment.checked = !!r.payment; els.autoPersonal.checked = r.personal !== false; els.autoNames.checked = r.names !== false; }
     } catch (e) {}
   }
   function saveAutoRules() {
-    try { localStorage.setItem(AUTO_KEY, JSON.stringify({ prices: els.autoPrices.checked, payment: els.autoPayment.checked })); } catch (e) {}
+    try { localStorage.setItem(AUTO_KEY, JSON.stringify({ prices: els.autoPrices.checked, payment: els.autoPayment.checked, personal: els.autoPersonal.checked, names: els.autoNames.checked })); } catch (e) {}
   }
   async function runAutoRules() {
     if (!state.pdf) return;
     const parts = [];
+    status('Applying automatic rules…', { sticky: true });
+    if (els.autoPersonal.checked) {
+      let n = await markLines(PERSONAL_LABEL_RE);
+      for (const rule of personalRules) n += await markMatches(regexMatcher(rule.re), rule.label, { quiet: true });
+      parts.push(`${n} personal detail${n === 1 ? '' : 's'}`);
+    }
+    if (els.autoNames.checked) {
+      const n = await markMatches(nameLineMatcher, 'Possible names', { quiet: true });
+      parts.push(`${n} possible name${n === 1 ? '' : 's'}`);
+    }
     if (els.autoPayment.checked) {
       const n = await markLines(PAYMENT_RE);
       parts.push(`${n} payment line${n === 1 ? '' : 's'}`);
     }
     if (els.autoPrices.checked) {
-      const n = await markMatches(regexMatcher(patterns.price.re), patterns.price.label);
+      const n = await markMatches(regexMatcher(patterns.price.re), patterns.price.label, { quiet: true });
       parts.push(`${n} price${n === 1 ? '' : 's'}`);
     }
-    const msg = parts.length ? 'Automatically redacted ' + parts.join(' and ') : 'No automatic rules are switched on';
+    const msg = parts.length ? 'Automatically redacted ' + parts.join(', ') : 'No automatic rules are switched on';
     els.autoCount.textContent = msg;
     status(msg);
   }
@@ -646,8 +722,8 @@ function init(libs) {
     return (str) => { const out = []; let m; re.lastIndex = 0; while ((m = re.exec(str)) !== null) { if (m[0].length) out.push([m.index, m[0].length]); else re.lastIndex++; } return out; };
   }
   const patterns = {
-    email: { label: 'Email addresses', re: /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g },
-    phone: { label: 'Phone numbers', re: /(?:\+?61|\(0\d\)|0)[\s-]?\d(?:[\s-]?\d){7,9}\b/g },
+    email: { label: 'Email addresses', re: personalRules.find(r => r.key === 'email').re },
+    phone: { label: 'Phone numbers', re: personalRules.find(r => r.key === 'phone').re },
     vin:   { label: 'VINs', re: /\b[A-HJ-NPR-Z0-9]{17}\b/g },
     // "$1,234.56", "$ 99", "AUD 1,000", "A$12.50", a bare "1,234.00", or a "$" on its own (invoices often
     // put the sign in a separate column). Anything with a currency sign or two decimals is treated as a price.
@@ -706,7 +782,7 @@ function init(libs) {
   els.findInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') els.findBtn.click(); });
   els.patterns.forEach(b => b.addEventListener('click', () => { const pt = patterns[b.dataset.pattern]; markMatches(regexMatcher(pt.re), pt.label); }));
   loadAutoRules();
-  [els.autoPrices, els.autoPayment].forEach(e => e.addEventListener('change', saveAutoRules));
+  [els.autoPrices, els.autoPayment, els.autoPersonal, els.autoNames].forEach(e => e.addEventListener('change', saveAutoRules));
   els.autoRunBtn.addEventListener('click', runAutoRules);
 
   els.undoBtn.addEventListener('click', undo);
@@ -735,6 +811,7 @@ function init(libs) {
   window.addEventListener('beforeunload', (e) => { if (state.marks.length) { e.preventDefault(); e.returnValue = ''; } });
 
   refreshControls();
+  window.clearState = state; // read-only hook for automated tests
 }
 </script>
 </body>

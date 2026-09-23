@@ -22,10 +22,21 @@ Any other static host works the same way: upload `index.html` and the `vendor` f
 ## How it works
 
 1. **Open a PDF** with the button or by dropping it onto the page. The
-   automatic rules run straight away: every price or dollar amount is covered,
-   and so is any line mentioning payment details (payment method, amount paid
-   or due, card, EFT, BPAY, BSB or account details). Either rule can be switched
-   off in the sidebar; the choice is remembered.
+   automatic rules run straight away and cover:
+   - personal details: email addresses, phone and mobile numbers, street and
+     postal addresses, suburb/state/postcode lines, names with a salutation
+     (Mr, Mrs, Dr…), business names (Pty Ltd, P/L, T/As…), and any line
+     labelled Name, Contact, Address, ABN, Licence, DOB and similar;
+   - possible names: lines made only of two to four capitalised words. This
+     catches most bare names but may also cover the odd heading, so glance over
+     the page and remove any box you do not want;
+   - payment details: any line mentioning a payment method, amount paid or due,
+     card, EFT, BPAY, BSB or account details;
+   - prices: every dollar amount.
+
+   Each rule has a tick box in the sidebar and the choice is remembered. The
+   rules go by the text in the PDF, so a scanned document with no real text
+   underneath needs boxes drawn by hand.
 2. **Redact more areas** by dragging a box on any page, or type text and press
    *Redact all matches*. Quick patterns cover email addresses, Australian
    phone numbers, vehicle identification numbers (VINs) and prices in one click.
