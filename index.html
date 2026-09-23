@@ -75,11 +75,13 @@
   .page .pnum { position: absolute; left: 0; top: -20px; font-size: 12px; color: var(--muted); }
   .overlay { position: absolute; inset: 0; cursor: crosshair; touch-action: none; user-select: none; }
   .mark {
-    position: absolute; background: #000; border: 1.5px solid var(--red);
+    position: absolute; background: #fff; border: 1.5px solid var(--red);
     cursor: pointer; box-sizing: border-box; transition: background .12s;
   }
-  .mark:hover { background: rgba(0, 0, 0, 0.35); }                       /* peek at what is underneath */
+  .mark:hover { background: rgba(255, 255, 255, 0.35); }                 /* peek at what is underneath */
   .mark.selected { border-width: 2.5px; outline: 2px solid #fff; box-shadow: 0 0 0 4px var(--red); }
+  .chk { display: flex; align-items: flex-start; gap: 7px; font-size: 12.5px; margin: 4px 0; cursor: pointer; }
+  .chk input { margin: 2px 0 0; }
   .mark.temp { background: var(--red-soft); }
   .mark .x {
     position: absolute; top: -12px; right: -12px; width: 24px; height: 24px; border-radius: 50%;
@@ -150,16 +152,28 @@
 <main>
   <aside>
     <div>
-      <h2>Black out an area</h2>
-      <p>Drag on any page to black it out. Hover over a box to peek at what is underneath. Click <b>Export redacted PDF</b> to save a copy with the blacked-out text removed for good.</p>
+      <h2>Automatic</h2>
+      <p>Applied to every PDF the moment it opens. Use <b>Run again</b> after removing boxes.</p>
+      <label class="chk"><input type="checkbox" id="autoSection" checked> Everything under this heading</label>
+      <input type="text" id="autoHeading" value="Customer Details" placeholder="Heading text" aria-label="Heading text">
+      <label class="chk" style="margin-top:8px"><input type="checkbox" id="autoPrices" checked> All prices and dollar amounts</label>
+      <div class="row" style="margin-top:6px">
+        <button id="autoRunBtn" class="small" disabled>Run again</button>
+        <span class="count" id="autoCount"></span>
+      </div>
+    </div>
+
+    <div>
+      <h2>Redact an area by hand</h2>
+      <p>Drag on any page to white it out. Hover over a box to peek at what is underneath. Click <b>Export redacted PDF</b> to save a copy with the covered text removed for good.</p>
       <p>Changed your mind? Click a box to select it, then use its <b>×</b>, press <kbd>Delete</kbd>, or double-click it to remove the box and reveal the text again.</p>
     </div>
 
     <div>
-      <h2>Find and black out text</h2>
+      <h2>Find and redact text</h2>
       <input type="text" id="findInput" placeholder="Name, address, rego…" disabled>
       <div class="row" style="margin-top:8px">
-        <button id="findBtn" class="small" disabled>Black out all matches</button>
+        <button id="findBtn" class="small" disabled>Redact all matches</button>
         <span class="count" id="findCount"></span>
       </div>
       <p style="margin-top:10px">Quick patterns:</p>
@@ -167,13 +181,14 @@
         <button class="small pattern" data-pattern="email" disabled>Email addresses</button>
         <button class="small pattern" data-pattern="phone" disabled>Phone numbers</button>
         <button class="small pattern" data-pattern="vin" disabled>VINs</button>
+        <button class="small pattern" data-pattern="price" disabled>Prices</button>
       </div>
     </div>
 
     <div>
       <h2>Redactions</h2>
       <div class="row">
-        <span class="count" id="markCount">Nothing blacked out yet</span>
+        <span class="count" id="markCount">Nothing redacted yet</span>
       </div>
       <div class="row">
         <span class="count" id="selCount">Nothing selected</span>
@@ -195,7 +210,7 @@
     </div>
 
     <div class="note">
-      The black boxes on screen are a preview. Export flattens every page to an image with those areas painted solid black, then builds a fresh PDF. The text and metadata underneath are removed, not just hidden, so the redacted file is not text-searchable. Your original file is never changed.<br><br>
+      The white boxes on screen are a preview (the red outline is not exported). Export flattens every page to a single picture with those areas painted solid white, then builds a fresh PDF. The exported file has no text, layers, fonts or metadata to peel back, so the covered content cannot be recovered with a PDF editor or image editor. Your original file is never changed.<br><br>
       Nothing is uploaded. The PDF never leaves this tab. The only network requests are for the page's font and, if the bundled copies in the <code>vendor</code> folder are missing, the two open-source libraries it uses (pdf.js and pdf-lib).
     </div>
   </aside>
@@ -297,6 +312,7 @@ function init(libs) {
     findInput: $('findInput'), findBtn: $('findBtn'), findCount: $('findCount'),
     markCount: $('markCount'), selCount: $('selCount'), undoBtn: $('undoBtn'), deleteBtn: $('deleteBtn'), clearBtn: $('clearBtn'),
     zoomIn: $('zoomIn'), zoomOut: $('zoomOut'), zoomFit: $('zoomFit'),
+    autoSection: $('autoSection'), autoHeading: $('autoHeading'), autoPrices: $('autoPrices'), autoRunBtn: $('autoRunBtn'), autoCount: $('autoCount'),
     viewer: $('viewer'), drop: $('drop'), pages: $('pages'), status: $('status'),
     patterns: Array.from(document.querySelectorAll('.pattern')),
   };
@@ -320,14 +336,14 @@ function init(libs) {
     const loaded = !!state.pdf && !state.busy;
     const n = state.marks.length;
     const pagesWithMarks = new Set(state.marks.map(m => m.page)).size;
-    [els.findInput, els.findBtn, els.zoomIn, els.zoomOut, els.zoomFit, ...els.patterns].forEach(e => (e.disabled = !loaded));
+    [els.findInput, els.findBtn, els.zoomIn, els.zoomOut, els.zoomFit, els.autoRunBtn, ...els.patterns].forEach(e => (e.disabled = !loaded));
     els.exportBtn.disabled = !loaded;
     els.undoBtn.disabled = !loaded || state.history.length === 0;
     els.clearBtn.disabled = !loaded || state.marks.length === 0;
     els.deleteBtn.disabled = !loaded || state.selected == null;
     const sel = state.marks.find(m => m.id === state.selected);
     els.selCount.textContent = sel ? `Selected: box on page ${sel.page}` : (n ? 'Nothing selected. Click a box to select it.' : 'Nothing selected');
-    els.markCount.textContent = n === 0 ? 'Nothing blacked out yet' : `${n} box${n === 1 ? '' : 'es'} across ${pagesWithMarks} page${pagesWithMarks === 1 ? '' : 's'}`;
+    els.markCount.textContent = n === 0 ? 'Nothing redacted yet' : `${n} box${n === 1 ? '' : 'es'} across ${pagesWithMarks} page${pagesWithMarks === 1 ? '' : 's'}`;
   }
 
   /* ---------- loading ---------- */
@@ -350,6 +366,7 @@ function init(libs) {
       fitWidth();
       await renderAll();
       hideStatus();
+      await runAutoRules();
     } catch (err) {
       const msg = /password/i.test(String(err && err.name)) || /password/i.test(String(err && err.message))
         ? 'This PDF is password-protected. Remove the password first, then open it here.'
@@ -439,7 +456,7 @@ function init(libs) {
       const el = document.createElement('div');
       el.className = 'mark' + (m.id === state.selected ? ' selected' : '');
       el.style.left = r.left + 'px'; el.style.top = r.top + 'px'; el.style.width = r.width + 'px'; el.style.height = r.height + 'px';
-      el.dataset.id = m.id; el.title = 'Blacked out. Click to select; Delete key removes the box.';
+      el.dataset.id = m.id; el.title = 'Redacted. Click to select; Delete key removes the box.';
       if (m.id === state.selected) {
         const x = document.createElement('span'); x.className = 'x'; x.textContent = '×'; x.title = 'Remove this box';
         x.addEventListener('pointerdown', (e) => { e.stopPropagation(); removeMark(m.id); status('Box removed. The text is visible again.'); });
@@ -479,7 +496,7 @@ function init(libs) {
       const [ax, ay] = viewToPdf(p, d.x0, d.y0);
       const [bx, by] = viewToPdf(p, d.x1, d.y1);
       if (addMarks([{ page: p.num, x: Math.min(ax, bx), y: Math.min(ay, by), w: Math.abs(bx - ax), h: Math.abs(by - ay) }], true)) {
-        status('Blacked out. Click Export redacted PDF to save the file with this text removed.');
+        status('Covered. Click Export redacted PDF to save the file with this text removed.');
       }
     };
     ov.addEventListener('pointerup', finish);
@@ -549,10 +566,80 @@ function init(libs) {
       }
     } finally { state.busy = false; }
     const added = addMarks(found);
-    const msg = found.length ? `${label}: ${found.length} match${found.length === 1 ? '' : 'es'} blacked out` + (added < found.length ? ` (${found.length - added} already done)` : '') : `${label}: no matches found`;
+    const msg = found.length ? `${label}: ${found.length} match${found.length === 1 ? '' : 'es'} redacted` + (added < found.length ? ` (${found.length - added} already done)` : '') : `${label}: no matches found`;
     els.findCount.textContent = msg;
     status(msg);
     refreshControls();
+    return found.length;
+  }
+
+  /* ---------- whole-section rule: every line under a heading, until a blank gap ---------- */
+  // Finds each text item containing the heading, then collects the lines below it that start in the
+  // same column, stopping at the first vertical gap wider than a couple of lines. One box per block.
+  function sectionRects(p, items, heading) {
+    const needle = heading.trim().toLowerCase();
+    if (needle.length < 2) return [];
+    const rects = [];
+    const info = items.map(it => ({ it, x: it.transform[4], y: it.transform[5], h: it.height || Math.hypot(it.transform[2], it.transform[3]), w: it.width }));
+    for (const head of info) {
+      if (!head.it.str.toLowerCase().includes(needle)) continue;
+      const colL = head.x - 6, colR = head.x + Math.max(head.w, 260);
+      const below = info.filter(o => o !== head && o.y < head.y - 0.5 * head.h && o.x >= colL && o.x <= colR).sort((a, b) => b.y - a.y);
+      const block = [];
+      let lastY = head.y, lastH = head.h;
+      for (const o of below) {
+        const gap = lastY - o.y;
+        if (gap > 2.6 * Math.max(lastH, o.h)) break;
+        block.push(o); lastY = o.y; lastH = o.h;
+        if (block.length > 40) break;
+      }
+      if (!block.length) continue;
+      let r = null;
+      for (const o of block) {
+        const q = spanToRect(p, o.it, 0, o.it.str.length);
+        r = r ? { x: Math.min(r.x, q.x), y: Math.min(r.y, q.y), x2: Math.max(r.x2, q.x + q.w), y2: Math.max(r.y2, q.y + q.h) } : { x: q.x, y: q.y, x2: q.x + q.w, y2: q.y + q.h };
+      }
+      rects.push({ page: p.num, x: r.x, y: r.y, w: r.x2 - r.x, h: r.y2 - r.y });
+    }
+    return rects;
+  }
+
+  async function markSections(heading) {
+    state.busy = true; refreshControls();
+    const found = [];
+    try {
+      for (const p of state.pages) found.push(...sectionRects(p, await getItems(p), heading));
+    } finally { state.busy = false; }
+    addMarks(found);
+    refreshControls();
+    return found.length;
+  }
+
+  /* ---------- automatic rules, run when a PDF opens ---------- */
+  const AUTO_KEY = 'clear.autoRules';
+  function loadAutoRules() {
+    try {
+      const r = JSON.parse(localStorage.getItem(AUTO_KEY) || 'null');
+      if (r) { els.autoSection.checked = !!r.section; els.autoHeading.value = r.heading || 'Customer Details'; els.autoPrices.checked = !!r.prices; }
+    } catch (e) {}
+  }
+  function saveAutoRules() {
+    try { localStorage.setItem(AUTO_KEY, JSON.stringify({ section: els.autoSection.checked, heading: els.autoHeading.value, prices: els.autoPrices.checked })); } catch (e) {}
+  }
+  async function runAutoRules() {
+    if (!state.pdf) return;
+    const parts = [];
+    if (els.autoSection.checked && els.autoHeading.value.trim()) {
+      const n = await markSections(els.autoHeading.value);
+      parts.push(`${n} "${els.autoHeading.value.trim()}" block${n === 1 ? '' : 's'}`);
+    }
+    if (els.autoPrices.checked) {
+      const n = await markMatches(regexMatcher(patterns.price.re), patterns.price.label);
+      parts.push(`${n} price${n === 1 ? '' : 's'}`);
+    }
+    const msg = parts.length ? 'Automatically redacted ' + parts.join(' and ') : 'No automatic rules are switched on';
+    els.autoCount.textContent = msg;
+    status(msg);
   }
 
   function literalMatcher(q) {
@@ -570,6 +657,9 @@ function init(libs) {
     email: { label: 'Email addresses', re: /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g },
     phone: { label: 'Phone numbers', re: /(?:\+?61|\(0\d\)|0)[\s-]?\d(?:[\s-]?\d){7,9}\b/g },
     vin:   { label: 'VINs', re: /\b[A-HJ-NPR-Z0-9]{17}\b/g },
+    // "$1,234.56", "$ 99", "AUD 1,000", "A$12.50", a bare "1,234.00", or a "$" on its own (invoices often
+    // put the sign in a separate column). Anything with a currency sign or two decimals is treated as a price.
+    price: { label: 'Prices', re: /(?:A?\$|AUD\s?\$?)\s?\d[\d,]*(?:\.\d{1,2})?|\b\d{1,3}(?:,\d{3})*\.\d{2}\b|(?<![\w.])A?\$(?![\w.])/g },
   };
 
   /* ---------- export ---------- */
@@ -590,7 +680,7 @@ function init(libs) {
         const ctx = c.getContext('2d');
         ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
         await p.page.render({ canvasContext: ctx, viewport: vp }).promise;
-        ctx.fillStyle = '#000';
+        ctx.fillStyle = '#fff';
         for (const m of state.marks) {
           if (m.page !== p.num) continue;
           const [x1, y1, x2, y2] = vp.convertToViewportRectangle([m.x, m.y, m.x + m.w, m.y + m.h]);
@@ -609,7 +699,7 @@ function init(libs) {
       a.href = url; a.download = state.fileName.replace(/\.pdf$/i, '') + '-redacted.pdf';
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10000);
-      status(`Saved ${a.download} with the blacked-out text removed. Check your downloads folder.`);
+      status(`Saved ${a.download} with the covered text removed. Check your downloads folder.`);
     } catch (err) {
       status('Export failed. ' + (err && err.message ? err.message : ''), { error: true });
     } finally { state.busy = false; refreshControls(); }
@@ -623,6 +713,10 @@ function init(libs) {
   els.findBtn.addEventListener('click', () => { const q = els.findInput.value.trim(); if (q) markMatches(literalMatcher(q), `"${q}"`); });
   els.findInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') els.findBtn.click(); });
   els.patterns.forEach(b => b.addEventListener('click', () => { const pt = patterns[b.dataset.pattern]; markMatches(regexMatcher(pt.re), pt.label); }));
+  loadAutoRules();
+  [els.autoSection, els.autoHeading, els.autoPrices].forEach(e => e.addEventListener('change', saveAutoRules));
+  els.autoRunBtn.addEventListener('click', runAutoRules);
+  els.autoHeading.addEventListener('keydown', (e) => { if (e.key === 'Enter') runAutoRules(); });
 
   els.undoBtn.addEventListener('click', undo);
   els.deleteBtn.addEventListener('click', () => { if (state.selected != null) { removeMark(state.selected); status('Box removed. The text is visible again.'); } });
